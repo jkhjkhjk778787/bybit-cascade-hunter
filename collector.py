@@ -443,7 +443,7 @@ class IntegratedMarketCollector:
                 break
             except Exception:
                 pass
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(3.0)
 
     async def monitor_worker(self):
         prev_count = 0
