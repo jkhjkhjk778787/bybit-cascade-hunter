@@ -268,11 +268,11 @@ class BybitTradingService:
         min_notional = float(spec.get("min_notional", 5.0))
         min_qty = float(spec.get("min_qty", 0.001))
 
-        # 목표 노셔널 (Margin * Leverage) 계산 및 거래소 최소 주문 금액($5.0) 보장
-        target_notional = order_value_usdt * effective_leverage
-        effective_notional = max(target_notional, min_notional, (min_qty * last_price))
+        # 가격 및 레버리지에 맞춘 동적 $6.0 거래대금(Notional) 및 최소 수량 보장 연산
+        min_safe_notional = max(6.0, min_notional, (min_qty * last_price))
+        target_notional = max(order_value_usdt * effective_leverage, min_safe_notional)
 
-        raw_qty = effective_notional / last_price
+        raw_qty = target_notional / last_price
 
         # Decimal 정밀 스텝 연산
         step_d = Decimal(step_str)
@@ -284,7 +284,8 @@ class BybitTradingService:
         if qty_d < min_q_d:
             qty_d = min_q_d
 
-        while (float(qty_d) * last_price) < min_notional:
+        # 최소 $6.0 거래대금(Notional) 하드 보장
+        while (float(qty_d) * last_price) < min_safe_notional:
             qty_d += step_d
 
         # 정수(e.g. 1)면 "3111", 소수(e.g. 0.001)면 "0.001"로 완벽 포맷

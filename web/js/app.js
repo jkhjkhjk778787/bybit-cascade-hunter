@@ -124,11 +124,14 @@ class CascadeTradingApp {
     try {
       const r = await fetch(`/api/history?symbol=${sym}`);
       const d = await r.json();
+      const lastP = d.candles?.length ? d.candles[d.candles.length - 1].c : (this.latestPrices[sym] || 1.0);
       if (d.max_leverage) {
         this.terminal.symbolMaxLeverages[sym] = d.max_leverage;
         if (this.currentSymbol === sym) {
-          this.terminal.setSymbol(sym, d.max_leverage);
+          this.terminal.setSymbol(sym, d.max_leverage, 0.001, lastP);
         }
+      } else if (this.currentSymbol === sym) {
+        this.terminal.updatePrice(lastP);
       }
       if (d.triggers) {
         this.triggerHistory[sym] = d.triggers;
@@ -362,8 +365,11 @@ class CascadeTradingApp {
       case 'TICKER':
         this.latestPrices[msg.symbol] = msg.price;
         this.chart.onTick(msg);
-        if (msg.symbol === this.currentSymbol && this._priceEl) {
-          this._priceEl.textContent = `$${msg.price.toFixed(msg.price > 10 ? 2 : msg.price > 0.1 ? 4 : 6)}`;
+        if (msg.symbol === this.currentSymbol) {
+          if (this._priceEl) {
+            this._priceEl.textContent = `$${msg.price.toFixed(msg.price > 10 ? 2 : msg.price > 0.1 ? 4 : 6)}`;
+          }
+          this.terminal.updatePrice(msg.price);
         }
         break;
 

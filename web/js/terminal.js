@@ -7,10 +7,13 @@ export class TerminalComponent {
     this.app = app;
     this.selectedSide = 'Sell'; // Default to Short (Cascade Scalp)
     this.selectedSymbol = 'VELVETUSDT';
-    this.orderUsd = 1.5;
+    this.orderUsd = 0.24;
     this.leverage = 25;
     this.tpPct = 2.0;
     this.slPct = 0.6;
+    this.isAutoMarginMode = true;
+    this.lastPrice = 1.0;
+    this.minQty = 0.001;
     this.symbolMaxLeverages = {};
     this.positionsListEl = document.getElementById('positionsList');
 
@@ -40,21 +43,34 @@ export class TerminalComponent {
     });
 
     // Quick Amount Buttons
-    document.querySelectorAll('.btn-quick-amount').forEach(btn => {
+    const pills = document.querySelectorAll('.btn-quick-amount');
+    pills.forEach(btn => {
       btn.addEventListener('click', () => {
-        const val = parseFloat(btn.dataset.val);
-        document.getElementById('inputOrderUsd').value = val;
-        this.orderUsd = val;
+        pills.forEach(p => p.classList.remove('active'));
+        btn.classList.add('active');
+
+        if (btn.dataset.val === 'auto') {
+          this.isAutoMarginMode = true;
+          this.recalculateMargin();
+        } else {
+          this.isAutoMarginMode = false;
+          const val = parseFloat(btn.dataset.val);
+          document.getElementById('inputOrderUsd').value = val;
+          this.orderUsd = val;
+        }
       });
     });
 
     // Inputs
     document.getElementById('inputOrderUsd').addEventListener('input', (e) => {
-      this.orderUsd = parseFloat(e.target.value) || 1.0;
+      this.isAutoMarginMode = false;
+      pills.forEach(p => p.classList.remove('active'));
+      this.orderUsd = parseFloat(e.target.value) || 0.1;
     });
 
     document.getElementById('inputLeverage').addEventListener('input', (e) => {
       this.leverage = parseFloat(e.target.value) || 15;
+      this.recalculateMargin();
     });
 
     // MAX Leverage Button
@@ -64,6 +80,7 @@ export class TerminalComponent {
         const maxLev = this.symbolMaxLeverages[this.selectedSymbol] || 25;
         this.leverage = maxLev;
         document.getElementById('inputLeverage').value = maxLev;
+        this.recalculateMargin();
       });
     }
 
@@ -98,11 +115,35 @@ export class TerminalComponent {
     }
   }
 
-  setSymbol(sym, maxLev = null) {
+  recalculateMargin() {
+    const notional = Math.max(6.0, this.minQty * (this.lastPrice || 1.0));
+    const lev = Math.max(1, this.leverage || 25);
+    const reqMargin = Math.max(0.05, parseFloat((notional / lev).toFixed(2)));
+
+    const badge = document.getElementById('calcReqMargin');
+    if (badge) badge.textContent = `$${reqMargin.toFixed(2)}`;
+
+    if (this.isAutoMarginMode) {
+      this.orderUsd = reqMargin;
+      const inp = document.getElementById('inputOrderUsd');
+      if (inp) inp.value = reqMargin;
+    }
+  }
+
+  updatePrice(price, minQty = null) {
+    if (price && price > 0) this.lastPrice = price;
+    if (minQty && minQty > 0) this.minQty = minQty;
+    this.recalculateMargin();
+  }
+
+  setSymbol(sym, maxLev = null, minQty = null, price = null) {
     this.selectedSymbol = sym;
     const btnExec = document.getElementById('btnExecuteOrder');
     const action = this.selectedSide === 'Buy' ? 'BUY / LONG' : 'SELL / SHORT';
     btnExec.textContent = `${this.selectedSide === 'Buy' ? '🚀' : '⚡'} MARKET ${action} ${sym}`;
+
+    if (price && price > 0) this.lastPrice = price;
+    if (minQty && minQty > 0) this.minQty = minQty;
 
     // 최대 레버리지 자동 세팅
     if (maxLev) {
@@ -116,6 +157,9 @@ export class TerminalComponent {
 
     const maxLabel = document.getElementById('maxLevLabel');
     if (maxLabel) maxLabel.textContent = effectiveMaxLev;
+
+    // 가격/레버리지 기반 $6 노셔널 맞춤 증거금 즉시 재계산
+    this.recalculateMargin();
   }
 
   async executeOrder() {
