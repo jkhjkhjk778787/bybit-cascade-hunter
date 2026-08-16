@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-08-16 11:34:39",
+  "updated_at": "2026-08-16 11:38:23",
   "total_active_count": 4,
   "symbols": {
     "ACEUSDT": {
@@ -14,8 +14,8 @@
       "timeout_sec": 45.0,
       "trades": 9,
       "win_rate": 77.8,
-      "total_pnl_pct": 50.93,
-      "profit_factor": 3.98
+      "total_pnl_pct": 51.12,
+      "profit_factor": 4.01
     },
     "HEMIUSDT": {
       "bin_arm_usd": 200.0,
@@ -57,9 +57,9 @@
       "tp_pct": 2.5,
       "sl_pct": 0.6,
       "timeout_sec": 45.0,
-      "trades": 3,
+      "trades": 4,
       "win_rate": 100.0,
-      "total_pnl_pct": 10.46,
+      "total_pnl_pct": 13.98,
       "profit_factor": 999.0
     }
   }

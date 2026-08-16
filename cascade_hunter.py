@@ -457,24 +457,24 @@ class DualExchangeCascadeHunter:
         if is_armed:
             if event_type == "LIQ" and liq_usd >= by_conf_usd:
                 is_confirmed = True
-                confirm_reason = f"Binance 장전 중 Bybit 전이 청산 ${liq_usd:,.0f} 포착"
+                confirm_reason = f"🟡 Binance 도화선 ➔ 🟢 Bybit 전이청산 ${liq_usd:,.0f}"
             elif event_type == "TICK":
-                p_buf = self.bybit_price_buffers.get(symbol, deque())
+                p_buf = self.bybit_price_buffers.get(symbol, deque(maxlen=500))
                 if len(p_buf) >= 2:
                     p_old = p_buf[0][1]
                     drop_pct = (p_old - current_price) / p_old * 100.0
                     if drop_pct >= by_conf_drop:
                         is_confirmed = True
-                        confirm_reason = f"Binance 장전 중 Bybit 호가 낙폭 -{drop_pct:.2f}% 붕괴 확증"
+                        confirm_reason = f"🟡 Binance 도화선 ➔ 🟢 Bybit 낙폭 -{drop_pct:.2f}% 붕괴"
         else:
             # 바이비트 자체 대형 청산($300+) 백업 트리거
             if event_type == "LIQ":
-                buf = self.bybit_liq_buffers.get(symbol, deque())
+                buf = self.bybit_liq_buffers.get(symbol, deque(maxlen=500))
                 while buf and (now - buf[0][0] > 5.0): buf.popleft()
                 tot_liq = sum([b[1] for b in buf])
                 if tot_liq >= 300.0:
                     is_confirmed = True
-                    confirm_reason = f"Bybit 자체 대형 청산 ${tot_liq:,.0f} USD 폭발"
+                    confirm_reason = f"🟢 Bybit 자체 대형청산 ${tot_liq:,.0f} 폭발"
 
         if is_confirmed:
             logger.warning(f"🚀 [2단계 숏 격발!] {symbol} ({confirm_reason}) ➔ 0ms 시장가 숏 진입!")
@@ -509,10 +509,10 @@ class DualExchangeCascadeHunter:
                 self.last_liq_event_time = now
                 if symbol in self.binance_armed: del self.binance_armed[symbol]
 
-                logger.info(f"🚀 [숏 탑승 성공] {symbol} 수량: {qty_str} | 진입: ${px} | TP: ${tp_str} | SL: ${sl_str}")
+                logger.info(f"🚀 [숏 탑승 성공] {symbol} 수량: {qty_str} | 진입: ${px} | TP: ${tp_str} | SL: ${sl_str} | 근거: {confirm_reason}")
                 await self.notifier.async_send_embed(
                     title=f"🌊 [숏 진입] {symbol}",
-                    description=f"진입: `${px}` | 수량: `{qty_str}` | TP: `${tp_str}` | SL: `${sl_str}`",
+                    description=f"근거: `{confirm_reason}`\n진입: `${px}` | 수량: `{qty_str}` | TP: `${tp_str}` | SL: `${sl_str}`",
                     color=15158332
                 )
             else:
