@@ -123,6 +123,7 @@ class BybitTradingService:
                     self.symbol_specs[sym] = {
                         "min_qty": _safe_float(lsf.get("minOrderQty"), 0.001),
                         "qty_step": _safe_float(lsf.get("qtyStep"), 0.001),
+                        "min_notional": _safe_float(lsf.get("minNotionalValue"), 5.0),
                         "tick_size": _safe_float(pf.get("tickSize"), 0.0001),
                     }
         except Exception as e:
@@ -172,7 +173,12 @@ class BybitTradingService:
             "category": "linear", "symbol": symbol, "buyLeverage": str(leverage), "sellLeverage": str(leverage)
         })
 
-        spec = self.symbol_specs.get(symbol, {"min_qty": 0.001, "qty_step": 0.001, "tick_size": 0.0001})
+        spec = self.symbol_specs.get(symbol, {
+            "min_qty": 0.001,
+            "qty_step": 0.001,
+            "min_notional": 5.0,
+            "tick_size": 0.0001
+        })
         
         t_res = self._request("GET", "/v5/market/tickers", {"category": "linear", "symbol": symbol})
         last_price = 0.0
@@ -182,15 +188,33 @@ class BybitTradingService:
         if last_price <= 0:
             return {"retCode": -1, "retMsg": "Invalid price"}
 
-        notional = order_value_usdt * leverage
-        raw_qty = notional / last_price
-        
-        step_dec = max(0, -Decimal(str(spec["qty_step"])).as_tuple().exponent)
-        qty = float(Decimal(str(raw_qty)).quantize(Decimal(str(spec["qty_step"])), rounding=ROUND_DOWN))
-        if qty < spec["min_qty"]:
-            qty = spec["min_qty"]
+        min_notional = float(spec.get("min_notional", 5.0))
+        min_qty = float(spec.get("min_qty", 0.001))
+        qty_step = float(spec.get("qty_step", 0.001))
 
-        tick_dec = max(0, -Decimal(str(spec["tick_size"])).as_tuple().exponent)
+        # 목표 노셔널 (Margin * Leverage) 계산 및 거래소 최소 주문 금액($5.0) 보장
+        target_notional = order_value_usdt * leverage
+        effective_notional = max(target_notional, min_notional, (min_qty * last_price))
+
+        raw_qty = effective_notional / last_price
+        
+        step_dec = max(0, -Decimal(str(qty_step)).as_tuple().exponent)
+        step_val = Decimal(str(qty_step))
+        min_qty_val = Decimal(str(min_qty))
+
+        # 올림(ROUND_UP)을 적용하여 최소 수량/최소 노셔널 미달로 인한 거절 방지
+        qty_d = Decimal(str(raw_qty)).quantize(step_val, rounding=ROUND_UP)
+        if qty_d < min_qty_val:
+            qty_d = min_qty_val
+
+        # 거래대금이 min_notional($5.0) 미만일 경우 스텝 단위로 올려줌
+        while (float(qty_d) * last_price) < min_notional:
+            qty_d += step_val
+
+        qty_str = f"{qty_d:.{step_dec}f}"
+
+        tick_size = float(spec.get("tick_size", 0.0001))
+        tick_dec = max(0, -Decimal(str(tick_size)).as_tuple().exponent)
         if side == "Buy":
             tp_p = last_price * (1 + tp_pct / 100.0)
             sl_p = last_price * (1 - sl_pct / 100.0)
@@ -206,7 +230,7 @@ class BybitTradingService:
             "symbol": symbol,
             "side": side,
             "orderType": "Market",
-            "qty": f"{qty:.{step_dec}f}",
+            "qty": qty_str,
             "timeInForce": "IOC",
             "takeProfit": tp_str,
             "stopLoss": sl_str,
@@ -215,6 +239,7 @@ class BybitTradingService:
             "slOrderType": "Market"
         }
 
+        logger.info(f"🛒 [주문 생성] {symbol} {side} 수량: {qty_str} (약 ${float(qty_d)*last_price:,.2f} Notional) | 진입: ${last_price} | TP: {tp_str} | SL: {sl_str}")
         return self._request("POST", "/v5/order/create", order_params)
 
     def close_position(self, symbol: str, side: str, size: float) -> Dict[str, Any]:

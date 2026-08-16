@@ -250,15 +250,14 @@ class DualExchangeCascadeHunter:
         step = meta.get("qtyStep", "1")
         min_q = Decimal(str(meta.get("minQty", "1")))
         d_step = Decimal(str(step))
-        raw_qty = Decimal(str(notional)) / Decimal(str(price))
-        rounded = (raw_qty / d_step).quantize(Decimal('1'), rounding=ROUND_DOWN) * d_step
+        
+        effective_notional = max(notional, 5.0, float(min_q) * price)
+        raw_qty = Decimal(str(effective_notional)) / Decimal(str(price))
+        rounded = (raw_qty / d_step).quantize(Decimal('1'), rounding=ROUND_UP) * d_step
         if rounded < min_q:
-            # minQty로 올릴 경우 실제 노셔널이 설정의 3배 초과 시 진입 거부
-            actual_notional = float(min_q) * price
-            if actual_notional > notional * 3.0:
-                logger.warning(f"⚠️ [{symbol}] minQty 강제 올림 시 노셔널 ${actual_notional:.1f} > 한도 ${notional * 3.0:.1f} ➔ 진입 거부")
-                return "0"
             rounded = min_q
+        while (float(rounded) * price) < 5.0:
+            rounded += d_step
         return format(rounded.normalize(), 'f') if '.' in str(step) else str(int(rounded))
 
     def load_active_symbols_from_disk(self) -> bool:
