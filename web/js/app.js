@@ -49,6 +49,10 @@ class CascadeTradingApp {
       this.activeSymbolsData = data.active_symbols;
       if (data.latest_prices) this.latestPrices = data.latest_prices;
       if (data.armed_symbols) this.armedSymbols = data.armed_symbols;
+      if (data.max_leverages) {
+        Object.assign(this.terminal.symbolMaxLeverages, data.max_leverages);
+        this.terminal.setSymbol(this.currentSymbol);
+      }
 
       // Update Auto-Trade Button State
       const btnAuto = document.getElementById('btnAutoTrade');
@@ -101,7 +105,10 @@ class CascadeTradingApp {
     this.renderTriggerHistory(sym);
     this.fetchSymbolTriggers(sym);
 
-    // 3. Switch Chart & Terminal only when switching to a different symbol
+    // 3. Switch Terminal & Update Leverage immediately
+    this.terminal.setSymbol(sym);
+
+    // 4. Switch Chart only when switching to a different symbol
     if (isDifferent) {
       this.chart.setSymbol(sym);
       const armed = this.armedSymbols[sym];
@@ -110,14 +117,19 @@ class CascadeTradingApp {
       } else {
         this.chart.setArmedZone(null);
       }
-      this.terminal.setSymbol(sym);
     }
   }
 
   async fetchSymbolTriggers(sym) {
     try {
-      const r = await fetch(`/api/trigger_history?symbol=${sym}`);
+      const r = await fetch(`/api/history?symbol=${sym}`);
       const d = await r.json();
+      if (d.max_leverage) {
+        this.terminal.symbolMaxLeverages[sym] = d.max_leverage;
+        if (this.currentSymbol === sym) {
+          this.terminal.setSymbol(sym, d.max_leverage);
+        }
+      }
       if (d.triggers) {
         this.triggerHistory[sym] = d.triggers;
         if (this.currentSymbol === sym) {

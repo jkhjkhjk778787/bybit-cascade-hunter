@@ -165,9 +165,14 @@
 
           <!-- Leverage -->
           <div class="form-group">
-            <label class="form-label" for="inputLeverage">레버리지 (Leverage)</label>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+              <label class="form-label" for="inputLeverage" style="margin-bottom:0;">레버리지 (Leverage)</label>
+              <button id="btnSetMaxLev" type="button" style="background:hsla(185, 100%, 50%, 0.15); color:var(--brand-cyan); border:1px solid var(--brand-cyan); font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px; cursor:pointer;" title="해당 심볼의 바이비트 최대 레버리지로 설정">
+                MAX: <span id="maxLevLabel">25</span>x
+              </button>
+            </div>
             <div class="input-container">
-              <input type="number" id="inputLeverage" value="15" step="1" min="1" max="50">
+              <input type="number" id="inputLeverage" value="25" step="1" min="1" max="100">
               <span class="input-suffix">x</span>
             </div>
           </div>

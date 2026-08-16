@@ -124,10 +124,12 @@ class BybitTradingService:
                         sym = item.get("symbol")
                         lsf = item.get("lotSizeFilter", {})
                         pf = item.get("priceFilter", {})
+                        lf = item.get("leverageFilter", {})
                         step_str = lsf.get("qtyStep", "0.001")
                         min_q_str = lsf.get("minOrderQty", "0.001")
                         tick_str = pf.get("tickSize", "0.0001")
                         min_notional = _safe_float(lsf.get("minNotionalValue"), 5.0)
+                        max_lev = _safe_float(lf.get("maxLeverage"), 20.0)
 
                         self.symbol_specs[sym] = {
                             "min_qty": _safe_float(min_q_str, 0.001),
@@ -137,12 +139,14 @@ class BybitTradingService:
                             "tick_size_str": tick_str,
                             "min_notional": min_notional,
                             "tick_size": _safe_float(tick_str, 0.0001),
+                            "max_leverage": max_lev,
+                            "max_leverage_str": str(int(max_lev) if max_lev.is_integer() else max_lev),
                         }
                         count += 1
                     cursor = data.get("result", {}).get("nextPageCursor", "")
                     if not cursor or not items:
                         break
-            logger.info(f"📐 [Bybit 메타데이터 동기화] 총 {len(self.symbol_specs)}개 전 종목 규격 로드 완료")
+            logger.info(f"📐 [Bybit 메타데이터 동기화] 총 {len(self.symbol_specs)}개 전 종목 규격 및 최대 레버리지 캐싱 완료")
         except Exception as e:
             logger.error(f"심볼 메타데이터 로드 실패: {e}")
 
@@ -159,10 +163,12 @@ class BybitTradingService:
                     it = items[0]
                     lsf = it.get("lotSizeFilter", {})
                     pf = it.get("priceFilter", {})
+                    lf = it.get("leverageFilter", {})
                     step_str = lsf.get("qtyStep", "0.001")
                     min_q_str = lsf.get("minOrderQty", "0.001")
                     tick_str = pf.get("tickSize", "0.0001")
                     min_notional = _safe_float(lsf.get("minNotionalValue"), 5.0)
+                    max_lev = _safe_float(lf.get("maxLeverage"), 20.0)
                     spec = {
                         "min_qty": _safe_float(min_q_str, 0.001),
                         "qty_step": _safe_float(step_str, 0.001),
@@ -171,6 +177,8 @@ class BybitTradingService:
                         "tick_size_str": tick_str,
                         "min_notional": min_notional,
                         "tick_size": _safe_float(tick_str, 0.0001),
+                        "max_leverage": max_lev,
+                        "max_leverage_str": str(int(max_lev) if max_lev.is_integer() else max_lev),
                     }
                     self.symbol_specs[symbol] = spec
                     return spec
@@ -178,7 +186,8 @@ class BybitTradingService:
             pass
         return {
             "min_qty": 0.001, "qty_step": 0.001, "min_qty_str": "0.001",
-            "qty_step_str": "0.001", "tick_size_str": "0.0001", "min_notional": 5.0, "tick_size": 0.0001
+            "qty_step_str": "0.001", "tick_size_str": "0.0001", "min_notional": 5.0, "tick_size": 0.0001,
+            "max_leverage": 20.0, "max_leverage_str": "20"
         }
 
     def get_wallet_balance(self) -> Dict[str, Any]:
@@ -220,12 +229,20 @@ class BybitTradingService:
                     })
         return positions
 
-    def place_market_order(self, symbol: str, side: str, order_value_usdt: float, leverage: float = 15.0, tp_pct: float = 2.0, sl_pct: float = 0.6) -> Dict[str, Any]:
-        self._request("POST", "/v5/position/set-leverage", {
-            "category": "linear", "symbol": symbol, "buyLeverage": str(leverage), "sellLeverage": str(leverage)
-        })
-
+    def place_market_order(self, symbol: str, side: str, order_value_usdt: float, leverage: Optional[float] = None, tp_pct: float = 2.0, sl_pct: float = 0.6) -> Dict[str, Any]:
         spec = self.get_symbol_spec(symbol)
+        max_lev = float(spec.get("max_leverage", 20.0))
+
+        # 사용자 요청: 해당 심볼의 바이비트 최대 레버리지로 투자 (기본/미지정 시 최대치 적용)
+        if leverage is None or leverage <= 0 or leverage == 15.0:
+            effective_leverage = max_lev
+        else:
+            effective_leverage = min(float(leverage), max_lev)
+
+        lev_str = str(int(effective_leverage) if effective_leverage.is_integer() else effective_leverage)
+        self._request("POST", "/v5/position/set-leverage", {
+            "category": "linear", "symbol": symbol, "buyLeverage": lev_str, "sellLeverage": lev_str
+        })
 
         # 1. 가용 잔고(Available Balance) 자동 보정 (초과 주문 시 가용 잔고 내로 자동 스케일링)
         try:
@@ -252,7 +269,7 @@ class BybitTradingService:
         min_qty = float(spec.get("min_qty", 0.001))
 
         # 목표 노셔널 (Margin * Leverage) 계산 및 거래소 최소 주문 금액($5.0) 보장
-        target_notional = order_value_usdt * leverage
+        target_notional = order_value_usdt * effective_leverage
         effective_notional = max(target_notional, min_notional, (min_qty * last_price))
 
         raw_qty = effective_notional / last_price
@@ -279,25 +296,26 @@ class BybitTradingService:
 
         # TP / SL 가격 포맷팅
         tick_d = Decimal(tick_str)
+        last_px_d = Decimal(str(last_price))
         if side == "Buy":
-            raw_tp = Decimal(str(last_price)) * Decimal(str(1 + tp_pct / 100.0))
-            raw_sl = Decimal(str(last_price)) * Decimal(str(1 - sl_pct / 100.0))
+            tp_px = last_px_d * (Decimal('1') + Decimal(str(tp_pct / 100.0)))
+            sl_px = last_px_d * (Decimal('1') - Decimal(str(sl_pct / 100.0)))
         else:
-            raw_tp = Decimal(str(last_price)) * Decimal(str(1 - tp_pct / 100.0))
-            raw_sl = Decimal(str(last_price)) * Decimal(str(1 + sl_pct / 100.0))
+            tp_px = last_px_d * (Decimal('1') - Decimal(str(tp_pct / 100.0)))
+            sl_px = last_px_d * (Decimal('1') + Decimal(str(sl_pct / 100.0)))
 
-        tp_ticks = (raw_tp / tick_d).quantize(Decimal('1'), rounding=ROUND_HALF_UP)
-        sl_ticks = (raw_sl / tick_d).quantize(Decimal('1'), rounding=ROUND_HALF_UP)
-        tp_d = tp_ticks * tick_d
-        sl_d = sl_ticks * tick_d
-
+        tp_px = (tp_px / tick_d).quantize(Decimal('1'), rounding=ROUND_UP) * tick_d
+        sl_px = (sl_px / tick_d).quantize(Decimal('1'), rounding=ROUND_UP) * tick_d
+        
         if '.' in tick_str:
             tick_places = len(tick_str.split('.')[1])
-            tp_str = f"{tp_d:.{tick_places}f}"
-            sl_str = f"{sl_d:.{tick_places}f}"
+            tp_str = f"{tp_px:.{tick_places}f}"
+            sl_str = f"{sl_px:.{tick_places}f}"
         else:
-            tp_str = str(int(tp_d))
-            sl_str = str(int(sl_d))
+            tp_str = str(int(tp_px))
+            sl_str = str(int(sl_px))
+
+        logger.info(f"🛒 [주문 생성] {symbol} {side} 수량: {qty_str} (약 ${float(qty_d)*last_price:,.2f} Notional / {lev_str}x 최대 레버리지) | 진입: ${last_price} | TP: {tp_str} | SL: {sl_str}")
 
         order_params = {
             "category": "linear",
@@ -483,7 +501,8 @@ class CascadeTradingServer:
             "active_symbols": active_symbols_data,
             "armed_symbols": active_armed,
             "connected_ws_clients": len(self.ws_clients),
-            "latest_prices": self.latest_prices
+            "latest_prices": self.latest_prices,
+            "max_leverages": {s: sp.get("max_leverage", 20.0) for s, sp in self.trader.symbol_specs.items()}
         })
 
     async def handle_api_account(self, request: web.Request) -> web.Response:
@@ -572,13 +591,18 @@ class CascadeTradingServer:
 
         # In-memory trigger history for this symbol
         trig_list = list(self.trigger_history_by_sym.get(symbol, []))
+        spec = self.trader.get_symbol_spec(symbol)
+        max_lev = spec.get("max_leverage", 20.0)
+        max_lev_str = spec.get("max_leverage_str", "20")
 
         return web.json_response({
             "symbol": symbol,
             "candles": chart_data["candles"],
             "trades": chart_data["trades"],
             "liquidations": liq_data,
-            "triggers": trig_list
+            "triggers": trig_list,
+            "max_leverage": max_lev,
+            "max_leverage_str": max_lev_str
         })
 
     async def handle_api_trigger_history(self, request: web.Request) -> web.Response:

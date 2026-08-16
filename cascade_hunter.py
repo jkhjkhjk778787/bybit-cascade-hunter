@@ -232,8 +232,10 @@ class DualExchangeCascadeHunter:
                 tick = item.get("priceFilter", {}).get("tickSize", "0.0001")
                 qty_step = item.get("lotSizeFilter", {}).get("qtyStep", "1")
                 min_qty = item.get("lotSizeFilter", {}).get("minOrderQty", "1")
-                self.instrument_meta[sym] = {"tickSize": tick, "qtyStep": qty_step, "minQty": min_qty}
-            logger.info(f"📐 [메타데이터 로드] 총 {len(self.instrument_meta)}개 심볼 규격 동기화")
+                lf = item.get("leverageFilter", {})
+                max_lev = float(lf.get("maxLeverage", 20.0))
+                self.instrument_meta[sym] = {"tickSize": tick, "qtyStep": qty_step, "minQty": min_qty, "maxLeverage": max_lev}
+            logger.info(f"📐 [메타데이터 로드] 총 {len(self.instrument_meta)}개 심볼 규격 및 최대 레버리지 동기화 완료")
         except Exception as e:
             logger.error(f"메타데이터 로드 실패: {e}")
 
@@ -589,6 +591,8 @@ class DualExchangeCascadeHunter:
                 return
 
             link_id = f"CASCADE_{target_side[0]}_{int(now*1000)}"
+            max_lev = self.instrument_meta.get(symbol, {}).get("maxLeverage", 20.0)
+            self.client.set_leverage(symbol, max_lev)
             res = self.client.place_market_order_with_tpsl(symbol, target_side, qty_str, tp_str, sl_str, link_id)
 
             if res.get("retCode") == 0:

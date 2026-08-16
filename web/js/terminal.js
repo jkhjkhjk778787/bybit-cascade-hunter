@@ -8,9 +8,10 @@ export class TerminalComponent {
     this.selectedSide = 'Sell'; // Default to Short (Cascade Scalp)
     this.selectedSymbol = 'VELVETUSDT';
     this.orderUsd = 1.5;
-    this.leverage = 15;
+    this.leverage = 25;
     this.tpPct = 2.0;
     this.slPct = 0.6;
+    this.symbolMaxLeverages = {};
     this.positionsListEl = document.getElementById('positionsList');
 
     this.bindEvents();
@@ -56,6 +57,16 @@ export class TerminalComponent {
       this.leverage = parseFloat(e.target.value) || 15;
     });
 
+    // MAX Leverage Button
+    const btnMaxLev = document.getElementById('btnSetMaxLev');
+    if (btnMaxLev) {
+      btnMaxLev.addEventListener('click', () => {
+        const maxLev = this.symbolMaxLeverages[this.selectedSymbol] || 25;
+        this.leverage = maxLev;
+        document.getElementById('inputLeverage').value = maxLev;
+      });
+    }
+
     document.getElementById('inputTpPct').addEventListener('input', (e) => {
       this.tpPct = parseFloat(e.target.value) || 2.0;
     });
@@ -87,11 +98,24 @@ export class TerminalComponent {
     }
   }
 
-  setSymbol(sym) {
+  setSymbol(sym, maxLev = null) {
     this.selectedSymbol = sym;
     const btnExec = document.getElementById('btnExecuteOrder');
     const action = this.selectedSide === 'Buy' ? 'BUY / LONG' : 'SELL / SHORT';
     btnExec.textContent = `${this.selectedSide === 'Buy' ? '🚀' : '⚡'} MARKET ${action} ${sym}`;
+
+    // 최대 레버리지 자동 세팅
+    if (maxLev) {
+      this.symbolMaxLeverages[sym] = maxLev;
+    }
+    const effectiveMaxLev = maxLev || this.symbolMaxLeverages[sym] || 25;
+    this.leverage = effectiveMaxLev;
+
+    const inputLev = document.getElementById('inputLeverage');
+    if (inputLev) inputLev.value = effectiveMaxLev;
+
+    const maxLabel = document.getElementById('maxLevLabel');
+    if (maxLabel) maxLabel.textContent = effectiveMaxLev;
   }
 
   async executeOrder() {
