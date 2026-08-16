@@ -41,7 +41,7 @@ ACTIVE_SYMBOLS_PATH = "/home/jph/bybit_trade_collector/active_symbols.json"
 
 BYBIT_REST_URL = "https://api.bybit.com"
 BYBIT_WS_URL = "wss://stream.bybit.com/v5/public/linear"
-SCAN_INTERVAL_SEC = 60.0
+SCAN_INTERVAL_SEC = 120.0
 
 
 def send_discord_report(title: str, description: str, color: int = 3447003, fields: list = None):
@@ -469,6 +469,10 @@ class ShadowIncubator:
 
 
 def main():
+    try:
+        os.nice(10)
+    except Exception:
+        pass
     incubator = ShadowIncubator()
     try:
         asyncio.run(incubator.run())

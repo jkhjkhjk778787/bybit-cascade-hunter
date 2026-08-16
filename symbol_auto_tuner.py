@@ -42,7 +42,7 @@ logger = logging.getLogger("AutoTuner")
 DB_PATH = "/home/jph/bybit_trade_collector/bybit_trades.duckdb"
 OUTPUT_CONFIG_PATH = "/home/jph/bybit_trade_collector/active_symbols.json"
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
-TUNING_INTERVAL_SEC = 120.0
+TUNING_INTERVAL_SEC = 180.0
 
 
 def send_discord_report(title: str, description: str, color: int = 3447003):
