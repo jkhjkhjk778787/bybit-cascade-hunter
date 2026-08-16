@@ -2,10 +2,10 @@
  * Master Application Controller & WebSocket Connection Manager
  */
 
-import { ProChart } from './chart.js?v=20260817_0508';
-import { RadarComponent } from './radar.js?v=20260817_0508';
-import { TerminalComponent } from './terminal.js?v=20260817_0508';
-import { OrderflowComponent } from './orderflow.js?v=20260817_0508';
+import { ProChart } from './chart.js?v=20260817_0511';
+import { RadarComponent } from './radar.js?v=20260817_0511';
+import { TerminalComponent } from './terminal.js?v=20260817_0511';
+import { OrderflowComponent } from './orderflow.js?v=20260817_0511';
 
 class CascadeTradingApp {
   constructor() {
@@ -15,7 +15,6 @@ class CascadeTradingApp {
     this.armedSymbols = {};
     this.openPositions = [];
     this.lastTriggerTimeBySym = {};
-    this.triggerHistory = {}; // symbol -> Array of trigger records
     this.ws = null;
     this.reconnectTimer = null;
 
@@ -27,9 +26,6 @@ class CascadeTradingApp {
 
     this._priceEl = document.getElementById('currentSymPrice');
     this._symNameEl = document.getElementById('currentSymName');
-    this._thTitleEl = document.getElementById('thSymTitle');
-    this._thCountEl = document.getElementById('thCountBadge');
-    this._thListEl = document.getElementById('triggerHistoryList');
 
     this.init();
   }
@@ -37,7 +33,7 @@ class CascadeTradingApp {
   async init() {
     this.chart.setSymbol(this.currentSymbol);
     this.terminal.setSymbol(this.currentSymbol);
-    this.fetchSymbolTriggers(this.currentSymbol);
+    this.fetchSymbolHistory(this.currentSymbol);
     await this.fetchInitialState();
     this.connectWebSocket();
   }
@@ -101,9 +97,8 @@ class CascadeTradingApp {
       }
     }
 
-    // 2. Render & Fetch Trigger History for this symbol
-    this.renderTriggerHistory(sym);
-    this.fetchSymbolTriggers(sym);
+    // 2. Fetch Symbol Specs (leverage & price)
+    this.fetchSymbolHistory(sym);
 
     // 3. Switch Terminal & Update Leverage immediately
     this.terminal.setSymbol(sym);
@@ -120,7 +115,7 @@ class CascadeTradingApp {
     }
   }
 
-  async fetchSymbolTriggers(sym) {
+  async fetchSymbolHistory(sym) {
     try {
       const r = await fetch(`/api/history?symbol=${sym}`);
       const d = await r.json();
@@ -133,92 +128,7 @@ class CascadeTradingApp {
       } else if (this.currentSymbol === sym) {
         this.terminal.updatePrice(lastP);
       }
-      if (d.triggers) {
-        this.triggerHistory[sym] = d.triggers;
-        if (this.currentSymbol === sym) {
-          this.renderTriggerHistory(sym);
-        }
-      }
     } catch (e) {}
-  }
-
-  renderTriggerHistory(sym) {
-    if (!this._thListEl) return;
-    if (this._thTitleEl) this._thTitleEl.textContent = sym;
-    const trigs = this.triggerHistory[sym] || [];
-    if (this._thCountEl) this._thCountEl.textContent = `${trigs.length}건`;
-
-    this._thListEl.innerHTML = '';
-    if (!trigs.length) {
-      this._thListEl.innerHTML = `
-        <div style="color:var(--text-muted); font-size:11px; padding:12px; text-align:center;">
-          해당 심볼에 기록된 트리거 내역이 없습니다. (실시간 감시 중)
-        </div>
-      `;
-      return;
-    }
-
-    const frag = document.createDocumentFragment();
-    trigs.forEach(tr => {
-      const isSell = tr.target_side === 'Sell';
-      const card = document.createElement('div');
-      card.className = `trigger-record-card ${isSell ? 'short-signal' : 'long-signal'}`;
-
-      const bSign = tr.binance_cvd >= 0 ? '+' : '';
-      const ySign = tr.bybit_cvd >= 0 ? '+' : '';
-      const bCvdStr = `BIN: ${bSign}$${this._fmtUsd(tr.binance_cvd)}`;
-      const yCvdStr = `BYB: ${ySign}$${this._fmtUsd(tr.bybit_cvd)}`;
-
-      let evalHtml = '<span class="trig-eval-pending">⏱️ 사후 10s/30s 평가 대기...</span>';
-      if (tr.post_eval) {
-        const e = tr.post_eval;
-        const hit10Icon = e.hit_10s ? '🎯 적중' : '❌ 반등';
-        const hit10Class = e.hit_10s ? 'trig-eval-hit' : 'trig-eval-miss';
-        const p10Sign = e.diff_pct_10s >= 0 ? '+' : '';
-
-        const hit30Icon = e.hit_30s ? '🎯 적중' : '❌ 반등';
-        const hit30Class = e.hit_30s ? 'trig-eval-hit' : 'trig-eval-miss';
-        const p30Sign = e.diff_pct_30s >= 0 ? '+' : '';
-
-        evalHtml = `
-          <div style="display:flex; gap:8px; font-size:10px;">
-            <span class="${hit10Class}">10s: ${p10Sign}${e.diff_pct_10s}% (${hit10Icon})</span>
-            <span class="${hit30Class}">30s: ${p30Sign}${e.diff_pct_30s}% (${hit30Icon})</span>
-          </div>
-        `;
-      }
-
-      card.innerHTML = `
-        <div class="trig-row">
-          <span style="font-weight:800; color:var(--text-bright);">${tr.time_str || ''}</span>
-          <span class="${isSell ? 'trig-badge-short' : 'trig-badge-long'}">
-            ${tr.target_side_kr || (isSell ? '🔴 숏 진입' : '🟢 롱 진입')}
-          </span>
-        </div>
-        <div class="trig-row" style="color:var(--text-muted); font-size:10px;">
-          <span>발동가: <b style="color:var(--text-primary);">$${tr.trigger_price}</b></span>
-          <span>청산: $${Math.round(tr.binance_usd || 0).toLocaleString()} ➔ $${Math.round(tr.bybit_usd || 0).toLocaleString()} (${tr.lag_sec}s)</span>
-        </div>
-        <div class="trig-row" style="font-size:10px;">
-          <span style="color:var(--brand-cyan);">${tr.cvd_desc || 'CVD 방향'}</span>
-          <span style="color:var(--text-dim); font-size:9px;">${bCvdStr} | ${yCvdStr}</span>
-        </div>
-        <div class="trig-row" style="margin-top:2px; border-top:1px dashed var(--border-subtle); padding-top:4px;">
-          ${evalHtml}
-        </div>
-      `;
-
-      frag.appendChild(card);
-    });
-    this._thListEl.appendChild(frag);
-  }
-
-  _fmtUsd(v) {
-    if (v == null) return '0';
-    const abs = Math.abs(v);
-    if (abs >= 1_000_000) return (v / 1_000_000).toFixed(1) + 'M';
-    if (abs >= 1_000) return (v / 1_000).toFixed(1) + 'k';
-    return v.toFixed(0);
   }
 
   connectWebSocket() {
@@ -270,17 +180,6 @@ class CascadeTradingApp {
 
       case 'CASCADE_BURST':
         this.radar.addCascadeBurst(msg.cascade);
-        if (msg.trigger) {
-          const sym = msg.trigger.symbol;
-          if (!this.triggerHistory[sym]) this.triggerHistory[sym] = [];
-          // 중복 방지
-          if (!this.triggerHistory[sym].some(it => it.id === msg.trigger.id)) {
-            this.triggerHistory[sym].unshift(msg.trigger);
-          }
-          if (this.currentSymbol === sym) {
-            this.renderTriggerHistory(sym);
-          }
-        }
         if (msg.cascade?.symbol) {
           const sym = msg.cascade.symbol;
           const now = Date.now();
@@ -293,35 +192,6 @@ class CascadeTradingApp {
               this.selectSymbol(sym);
               this.terminal.showToast(`🚨 [트리거 발동] ${sym} 차트로 즉시 자동 전환!`, 'warn');
             }
-          }
-        }
-        break;
-
-      case 'TRIGGER_RECORDED':
-        if (msg.trigger) {
-          const sym = msg.trigger.symbol;
-          if (!this.triggerHistory[sym]) this.triggerHistory[sym] = [];
-          if (!this.triggerHistory[sym].some(it => it.id === msg.trigger.id)) {
-            this.triggerHistory[sym].unshift(msg.trigger);
-          }
-          if (this.currentSymbol === sym) {
-            this.renderTriggerHistory(sym);
-          }
-        }
-        break;
-
-      case 'TRIGGER_EVAL_UPDATE':
-        if (msg.trigger) {
-          const sym = msg.trigger.symbol;
-          const list = this.triggerHistory[sym] || [];
-          const target = list.find(it => it.id === msg.trigger.id);
-          if (target) {
-            Object.assign(target, msg.trigger);
-          } else {
-            list.unshift(msg.trigger);
-          }
-          if (this.currentSymbol === sym) {
-            this.renderTriggerHistory(sym);
           }
         }
         break;

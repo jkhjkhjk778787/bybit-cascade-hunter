@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Cascade Pro Trading Suite - Real-Time Liquidation & Scalping Terminal</title>
   <meta name="description" content="HFT-grade dual exchange liquidation cascade hunter, autonomous backtesting tuner, and 1-click semi-auto execution trading suite.">
-  <link rel="stylesheet" href="/css/style.css?v=20260817_0504">
+  <link rel="stylesheet" href="/css/style.css?v=20260817_0511">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
@@ -241,28 +241,15 @@
           </button>
         </div>
 
-        <!-- Open Positions Section -->
-        <section class="positions-section">
+        <!-- Open Positions Section (Expanded Full Height) -->
+        <section class="positions-section" style="flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 150px;">
           <div class="panel-header">
             <span class="panel-title">📊 Open Positions</span>
           </div>
-          <div class="panel-body" id="positionsList">
+          <div class="panel-body" id="positionsList" style="flex: 1; overflow-y: auto;">
             <!-- Dynamic Positions inserted here -->
-            <div style="color:var(--text-muted); font-size:11px; padding:8px; text-align:center;">
-              보유 중인 포지션 없음 (100% 현금 안전 보존)
-            </div>
-          </div>
-        </section>
-
-        <!-- Trigger Signal & CVD History Section -->
-        <section class="trigger-history-section" style="margin-top: 10px; display:flex; flex-direction:column; flex:1; min-height: 220px; overflow:hidden;">
-          <div class="panel-header" style="display:flex; justify-content:space-between; align-items:center;">
-            <span class="panel-title" style="font-size:11px; color:var(--brand-cyan);">📜 <span id="thSymTitle">VELVETUSDT</span> 트리거 & CVD 기록</span>
-            <span id="thCountBadge" style="font-size:10px; color:var(--text-muted); font-family:var(--font-mono);">0건</span>
-          </div>
-          <div class="panel-body" id="triggerHistoryList" style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:6px; padding:6px;">
             <div style="color:var(--text-muted); font-size:11px; padding:12px; text-align:center;">
-              해당 심볼에 기록된 트리거 내역이 없습니다. (실시간 감시 중)
+              보유 중인 포지션 없음 (100% 현금 안전 보존)
             </div>
           </div>
         </section>
@@ -272,6 +259,6 @@
   </div>
 
   <!-- Master Application Script -->
-  <script type="module" src="/js/app.js?v=20260817_0508"></script>
+  <script type="module" src="/js/app.js?v=20260817_0511"></script>
 </body>
 </html>

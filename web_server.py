@@ -719,7 +719,6 @@ class CascadeTradingServer:
         self._cvd_deltas: Dict[str, Dict[str, float]] = {}
         self.position_entry_times: Dict[str, float] = {}
         self.cascade_cooldowns: Dict[str, float] = {}
-        self.trigger_history_by_sym: Dict[str, deque] = {}
         # 초기 기본 20개 동시 상장 심볼
         self.top20_symbols: List[str] = [
             "BTCUSDT", "ETHUSDT", "SOLUSDT", "COWUSDT", "CYSUSDT",
@@ -739,37 +738,31 @@ class CascadeTradingServer:
         old_set = set(self.top20_symbols)
         new_set = set(new_top20)
 
-        dropped = old_set - new_set
-        added = new_set - old_set
+        to_remove = old_set - new_set
+        to_add = new_set - old_set
 
-        self.top20_symbols = list(new_top20)
-        self.subscribed_ticker_symbols = set(new_top20)
+        if to_remove or to_add:
+            self.top20_symbols = list(new_top20)
+            self.subscribed_ticker_symbols = set(new_top20)
+            logger.info(f"🔄 [구독 심볼 동적 교체] 제외: {', '.join(to_remove) or '없음'} | 추가: {', '.join(to_add) or '없음'}")
 
-        # 탈락 심볼 메모리 컬렉션 정리 (Memory Leak 방지)
-        for s in dropped:
-            self._cvd_deltas.pop(s, None)
-            self.recent_liquidations_by_sym.pop(s, None)
-            self.latest_prices.pop(s, None)
-            self.cascade_cooldowns.pop(s, None)
-
-        if self.ticker_ws and not self.ticker_ws.closed:
-            if dropped:
-                try:
-                    drop_topics = [f"tickers.{s}" for s in dropped]
-                    await self.ticker_ws.send_str(orjson.dumps({"op": "unsubscribe", "args": drop_topics}).decode('utf-8'))
-                    logger.info(f"🛑 [Bybit Ticker Stream] TOP 20 제외 심볼 구독 해제: {', '.join(dropped)}")
-                except Exception as e:
-                    logger.error(f"티커 구독 해제 실패: {e}")
-            if added:
-                try:
-                    for s in added:
-                        spec = self.trader.get_symbol_spec(s)
-                        logger.info(f"🔍 [신규 심볼 규격 검증] {s}: 최대레버리지 {spec.get('max_leverage')}x | minQty {spec.get('min_qty')} | qtyStep {spec.get('qty_step')} | minNotional ${spec.get('min_notional')}")
-                    add_topics = [f"tickers.{s}" for s in added]
-                    await self.ticker_ws.send_str(orjson.dumps({"op": "subscribe", "args": add_topics}).decode('utf-8'))
-                    logger.info(f"✨ [Bybit Ticker Stream] TOP 20 신규 진입 심볼 구독 등록: {', '.join(added)}")
-                except Exception as e:
-                    logger.error(f"티커 신규 구독 실패: {e}")
+            # Bybit Ticker 웹소켓 구독 갱신
+            try:
+                if self.ticker_ws and not self.ticker_ws.closed:
+                    if to_remove:
+                        unsub_topics = [f"tickers.{s}" for s in to_remove]
+                        await self.ticker_ws.send_str(orjson.dumps({"op": "unsubscribe", "args": unsub_topics}).decode('utf-8'))
+                        logger.info(f"🛑 [Bybit Ticker Stream] TOP 20 제외 심볼 구독 해제: {', '.join(to_remove)}")
+                    if to_add:
+                        # 신규 진입 심볼 규격 사전 검증 캐싱
+                        for s in to_add:
+                            spec = self.trader.get_symbol_spec(s)
+                            logger.info(f"🔍 [신규 심볼 규격 검증] {s}: 최대레버리지 {spec.get('max_leverage')}x | minQty {spec.get('min_qty')} | qtyStep {spec.get('qty_step')} | minNotional ${spec.get('min_notional')}")
+                        sub_topics = [f"tickers.{s}" for s in to_add]
+                        await self.ticker_ws.send_str(orjson.dumps({"op": "subscribe", "args": sub_topics}).decode('utf-8'))
+                        logger.info(f"✨ [Bybit Ticker Stream] TOP 20 신규 진입 심볼 구독 등록: {', '.join(to_add)}")
+            except Exception as e:
+                logger.error(f"티커 동적 구독 실패: {e}")
 
     async def subscribe_ticker_symbol(self, symbol: str):
         """특정 심볼 조회 시 임시 티커 스트림 활성화"""
@@ -791,7 +784,6 @@ class CascadeTradingServer:
         self.app.router.add_get("/api/account", self.handle_api_account)
         self.app.router.add_get("/api/symbols", self.handle_api_symbols)
         self.app.router.add_get("/api/history", self.handle_api_history)
-        self.app.router.add_get("/api/trigger_history", self.handle_api_trigger_history)
         self.app.router.add_get("/api/liquidations/analytics", self.handle_api_liquidation_analytics)
         self.app.router.add_post("/api/order/market", self.handle_api_market_order)
         self.app.router.add_post("/api/order/close_all", self.handle_api_close_all)
@@ -915,8 +907,6 @@ class CascadeTradingServer:
                 "usd": usd
             })
 
-        # In-memory trigger history for this symbol
-        trig_list = list(self.trigger_history_by_sym.get(symbol, []))
         spec = self.trader.get_symbol_spec(symbol)
         max_lev = spec.get("max_leverage", 20.0)
         max_lev_str = spec.get("max_leverage_str", "20")
@@ -926,24 +916,9 @@ class CascadeTradingServer:
             "candles": chart_data["candles"],
             "trades": chart_data["trades"],
             "liquidations": liq_data,
-            "triggers": trig_list,
             "max_leverage": max_lev,
             "max_leverage_str": max_lev_str
         })
-
-    async def handle_api_trigger_history(self, request: web.Request) -> web.Response:
-        """심볼별 또는 전 종목 최근 트리거 히스토리 반환"""
-        symbol = request.query.get("symbol")
-        if symbol:
-            symbol = symbol.upper()
-            triggers = list(self.trigger_history_by_sym.get(symbol, []))
-        else:
-            all_trigs = []
-            for s, q in self.trigger_history_by_sym.items():
-                all_trigs.extend(list(q))
-            all_trigs.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
-            triggers = all_trigs[:100]
-        return web.json_response({"symbol": symbol, "triggers": triggers})
 
     async def handle_api_liquidation_analytics(self, request: web.Request) -> web.Response:
         """3대 거래소 실시간 및 히스토리 청산 데이터 심층 분석 및 퀀트 인사이트 반환 (<2ms RAM Query)"""
@@ -1100,6 +1075,7 @@ class CascadeTradingServer:
                                     self.cascade_cooldowns[sym] = now + 25.0  # 25초 쿨타임 부여
                                     lag_sec = round(now - bin_liq["ts"], 2)
                                     target_side = "Sell" if event.is_long_liquidation else "Buy"
+                                    side_kr = "🔴 숏 (SHORT)" if target_side == "Sell" else "🟢 롱 (LONG)"
                                     cascade_data = {
                                         "symbol": sym,
                                         "is_long_liq": event.is_long_liquidation,
@@ -1133,38 +1109,10 @@ class CascadeTradingServer:
                                         cvd_trend = "DIV_BYB_SELL"
                                         cvd_desc = "⚠️ BIN 매수 / BYB 매도"
 
-                                    trig_record = {
-                                        "id": f"trig_{sym}_{int(now*1000)}",
-                                        "symbol": sym,
-                                        "timestamp": int(now * 1000),
-                                        "time_str": time.strftime("%H:%M:%S", time.localtime(now)),
-                                        "target_side": target_side, # "Sell" or "Buy"
-                                        "target_side_kr": "🔴 숏 (SHORT)" if target_side == "Sell" else "🟢 롱 (LONG)",
-                                        "trigger_price": cur_price,
-                                        "binance_usd": bin_liq["usd"],
-                                        "bybit_usd": event.notional_usd,
-                                        "lag_sec": lag_sec,
-                                        "binance_cvd": bin_cvd,
-                                        "bybit_cvd": byb_cvd,
-                                        "cvd_trend": cvd_trend,
-                                        "cvd_desc": cvd_desc,
-                                        "post_eval": None
-                                    }
-
-                                    if sym not in self.trigger_history_by_sym:
-                                        self.trigger_history_by_sym[sym] = deque(maxlen=50)
-                                    self.trigger_history_by_sym[sym].appendleft(trig_record)
-
-                                    cascade_data["trigger_record"] = trig_record
-
-                                    # 사후 가격 반응 평가 비동기 태스크 가동
-                                    asyncio.create_task(self._evaluate_trigger_outcome(trig_record))
-
-                                    logger.info(f"💥 [연쇄 청산 격발!] {sym} (Binance ${bin_liq['usd']:,.0f} ➔ Bybit ${event.notional_usd:,.0f} | {lag_sec}s 전이) [권장: {trig_record['target_side_kr']}] [CVD: {cvd_desc}]")
+                                    logger.info(f"💥 [연쇄 청산 격발!] {sym} (Binance ${bin_liq['usd']:,.0f} ➔ Bybit ${event.notional_usd:,.0f} | {lag_sec}s 전이) [권장: {side_kr}] [CVD: {cvd_desc}]")
                                     await self.broadcast({
                                         "type": "CASCADE_BURST",
-                                        "cascade": cascade_data,
-                                        "trigger": trig_record
+                                        "cascade": cascade_data
                                     })
 
                         if len(binance_recent_liqs) > 200:
@@ -1396,41 +1344,6 @@ class CascadeTradingServer:
                 logger.error(f"포지션 가드 루프 에러: {e}")
 
             await asyncio.sleep(0.5)
-
-    async def _evaluate_trigger_outcome(self, rec: Dict[str, Any]):
-        """트리거 발동 후 10초 / 30초 시점의 가격 방향성 및 시그널 적중률 평가"""
-        sym = rec.get("symbol")
-        start_px = float(rec.get("trigger_price", 0.0))
-        side = rec.get("target_side", "Sell")
-        if start_px <= 0:
-            return
-
-        # 10초 후 1차 체크
-        await asyncio.sleep(10)
-        px_10s = float(self.latest_prices.get(sym, start_px))
-        diff_pct_10s = ((px_10s - start_px) / start_px) * 100.0 if start_px > 0 else 0.0
-        hit_10s = (diff_pct_10s < -0.02) if side == "Sell" else (diff_pct_10s > 0.02)
-
-        # 30초 후 최종 체크 (추가 20초)
-        await asyncio.sleep(20)
-        px_30s = float(self.latest_prices.get(sym, px_10s))
-        diff_pct_30s = ((px_30s - start_px) / start_px) * 100.0 if start_px > 0 else 0.0
-        hit_30s = (diff_pct_30s < -0.04) if side == "Sell" else (diff_pct_30s > 0.04)
-
-        rec["post_eval"] = {
-            "px_10s": px_10s,
-            "diff_pct_10s": round(diff_pct_10s, 2),
-            "hit_10s": hit_10s,
-            "px_30s": px_30s,
-            "diff_pct_30s": round(diff_pct_30s, 2),
-            "hit_30s": hit_30s,
-        }
-
-        # 프론트엔드에 실시간 평가 결과 갱신 브로드캐스트
-        await self.broadcast({
-            "type": "TRIGGER_EVAL_UPDATE",
-            "trigger": rec
-        })
 
     async def run_account_sync_loop(self):
         """계좌 잔고 및 포지션 1초 주기 실시간 동기화 (남은 타임아웃 시간 계산 포함)"""
