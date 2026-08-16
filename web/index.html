@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Cascade Pro Trading Suite - Real-Time Liquidation & Scalping Terminal</title>
   <meta name="description" content="HFT-grade dual exchange liquidation cascade hunter, autonomous backtesting tuner, and 1-click semi-auto execution trading suite.">
-  <link rel="stylesheet" href="/css/style.css?v=20260817_0530">
+  <link rel="stylesheet" href="/css/style.css?v=20260817_0532">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
@@ -140,10 +140,10 @@
           <!-- Bottom Subpane: Real-Time Dual CVD Chart (Binance vs Bybit) -->
           <div class="chart-subpane">
             <div class="subpane-label" style="display:flex; justify-content:space-between; align-items:center; width:calc(100% - 24px); font-size:12px;">
-              <span style="font-weight:700;">🌊 DUAL-EXCHANGE CVD (누적 델타: 🟡 Binance vs 🟠 Bybit)</span>
-              <div id="cvdLiveLegend" style="display:flex; gap:16px; font-size:14px; font-weight:900; background:rgba(0,0,0,0.4); padding:3px 12px; border-radius:6px; border:1px solid var(--border-subtle); box-shadow:0 2px 6px rgba(0,0,0,0.3);">
-                <span id="cvdBinLegend" style="color:var(--binance-yellow); font-weight:900; letter-spacing:0.5px;">BIN: $0</span>
-                <span id="cvdBybLegend" style="color:var(--bybit-gold); font-weight:900; letter-spacing:0.5px;">BYB: $0</span>
+              <span style="font-weight:700;">🌊 DUAL-EXCHANGE CVD (누적 델타: 🟡 Binance vs 🔵 Bybit)</span>
+              <div id="cvdLiveLegend" style="display:flex; gap:10px; font-size:13.5px; font-weight:900;">
+                <span id="cvdBinLegend" style="color:#FCD535; background:rgba(252,213,53,0.12); padding:3px 10px; border-radius:5px; border:1px solid rgba(252,213,53,0.35); font-weight:900; letter-spacing:0.5px;">BIN: $0</span>
+                <span id="cvdBybLegend" style="color:#00F0FF; background:rgba(0,240,255,0.12); padding:3px 10px; border-radius:5px; border:1px solid rgba(0,240,255,0.35); font-weight:900; letter-spacing:0.5px;">BYB: $0</span>
               </div>
             </div>
             <canvas id="cvdCanvas"></canvas>
@@ -254,6 +254,6 @@
   </div>
 
   <!-- Master Application Script -->
-  <script type="module" src="/js/app.js?v=20260817_0530"></script>
+  <script type="module" src="/js/app.js?v=20260817_0532"></script>
 </body>
 </html>

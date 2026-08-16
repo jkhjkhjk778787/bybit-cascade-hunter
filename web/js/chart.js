@@ -264,12 +264,12 @@ export class ProChart {
     if (this._cvdBinLegendEl) {
       const bSign = this.binanceCvd >= 0 ? '+' : '';
       this._cvdBinLegendEl.textContent = `BIN: ${bSign}$${this._fmtUsd(this.binanceCvd)}`;
-      this._cvdBinLegendEl.style.color = this.binanceCvd >= 0 ? 'var(--binance-yellow)' : '#e74c6b';
+      this._cvdBinLegendEl.style.color = '#FCD535';
     }
     if (this._cvdBybLegendEl) {
       const ySign = this.bybitCvd >= 0 ? '+' : '';
       this._cvdBybLegendEl.textContent = `BYB: ${ySign}$${this._fmtUsd(this.bybitCvd)}`;
-      this._cvdBybLegendEl.style.color = this.bybitCvd >= 0 ? 'var(--bybit-gold)' : '#e74c6b';
+      this._cvdBybLegendEl.style.color = '#00F0FF';
     }
 
     this._requestRender(false, false, true);
@@ -298,12 +298,12 @@ export class ProChart {
     if (this._cvdBinLegendEl) {
       const bSign = this.binanceCvd >= 0 ? '+' : '';
       this._cvdBinLegendEl.textContent = `BIN: ${bSign}$${this._fmtUsd(this.binanceCvd)}`;
-      this._cvdBinLegendEl.style.color = this.binanceCvd >= 0 ? 'var(--binance-yellow)' : '#e74c6b';
+      this._cvdBinLegendEl.style.color = '#FCD535';
     }
     if (this._cvdBybLegendEl) {
       const ySign = this.bybitCvd >= 0 ? '+' : '';
       this._cvdBybLegendEl.textContent = `BYB: ${ySign}$${this._fmtUsd(this.bybitCvd)}`;
-      this._cvdBybLegendEl.style.color = this.bybitCvd >= 0 ? 'var(--bybit-gold)' : '#e74c6b';
+      this._cvdBybLegendEl.style.color = '#00F0FF';
     }
 
     this._requestRender(false, false, true);
@@ -779,24 +779,24 @@ export class ProChart {
     ctx.beginPath(); ctx.moveTo(this.pad.left, yZero); ctx.lineTo(w - this.pad.right, yZero); ctx.stroke();
     ctx.restore();
 
-    // 1. Draw Binance CVD (Yellow Line)
+    // 1. Draw Binance CVD (Bright Gold Yellow Line 🟡)
     ctx.beginPath();
     ctx.moveTo(xOf(pts[0].t), yOf(pts[0].bin));
     for (let i = 1; i < pts.length; i++) {
       ctx.lineTo(xOf(pts[i].t), yOf(pts[i].bin));
     }
-    ctx.strokeStyle = 'hsl(45, 100%, 55%)';
-    ctx.lineWidth = 2.2;
+    ctx.strokeStyle = '#FCD535';
+    ctx.lineWidth = 2.4;
     ctx.stroke();
 
-    // 2. Draw Bybit CVD (Gold/Orange Line)
+    // 2. Draw Bybit CVD (Vivid Electric Cyan Line 🔵)
     ctx.beginPath();
     ctx.moveTo(xOf(pts[0].t), yOf(pts[0].byb));
     for (let i = 1; i < pts.length; i++) {
       ctx.lineTo(xOf(pts[i].t), yOf(pts[i].byb));
     }
-    ctx.strokeStyle = 'hsl(32, 95%, 55%)';
-    ctx.lineWidth = 2.2;
+    ctx.strokeStyle = '#00F0FF';
+    ctx.lineWidth = 2.4;
     ctx.stroke();
   }
 
