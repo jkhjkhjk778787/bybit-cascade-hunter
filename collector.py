@@ -326,13 +326,12 @@ class IntegratedMarketCollector:
         if not config.ENABLE_LIQUIDATION_STREAM:
             return
 
-        symbols_list = list(self.subscribed_symbols)
-        log(f"[LIQ-STREAM] 3대 거래소 청산 데이터 수집기 가동 ({len(symbols_list)}개 심볼): {config.LIQUIDATION_EXCHANGES}")
+        log(f"[LIQ-STREAM] 3대 거래소 전 종목 실시간 청산 데이터 수집기 가동: {config.LIQUIDATION_EXCHANGES}")
 
-        # 전체 심볼 또는 관심 심볼 구독
+        # 전 종목 (symbols=None) 무제한 청산 스트림 수집 및 DuckDB 영구 적재
         self.liq_stream = LiquidationStream(
             exchanges=config.LIQUIDATION_EXCHANGES,
-            symbols=symbols_list,
+            symbols=None,
             min_notional_usd=config.LIQUIDATION_MIN_NOTIONAL_USD,
             include_raw=False
         )

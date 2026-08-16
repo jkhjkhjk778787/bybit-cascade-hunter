@@ -880,15 +880,16 @@ class CascadeTradingServer:
                         if not self.is_running: break
 
                         sym = event.symbol
-                        # 20개 선정 심볼만 엄격 필터링
-                        if self.top20_symbols and sym not in self.top20_symbols:
-                            continue
-
                         now = time.time()
                         event_dict = event.to_dict()
+                        
+                        # 전 종목 청산 데이터 심볼별 인메모리 큐 영구 보존
                         if sym not in self.recent_liquidations_by_sym:
-                            self.recent_liquidations_by_sym[sym] = deque(maxlen=50)
+                            self.recent_liquidations_by_sym[sym] = deque(maxlen=200)
                         self.recent_liquidations_by_sym[sym].append(event_dict)
+
+                        # 레이더 및 자동매매 타겟팅: TOP 20 또는 활성 구독 심볼
+                        is_target_symbol = (not self.top20_symbols) or (sym in self.top20_symbols) or (sym in self.subscribed_ticker_symbols)
 
                         is_cascade = False
                         cascade_data = None

@@ -22,8 +22,7 @@ while True:
             [
                 "/home/jph/bybit_trade_collector/venv/bin/python",
                 "-u",
-                "/home/jph/bybit_trade_collector/collector.py",
-                "--symbol", "AKEUSDT"
+                "/home/jph/bybit_trade_collector/collector.py"
             ],
             cwd="/home/jph/bybit_trade_collector",
             stdout=f,
