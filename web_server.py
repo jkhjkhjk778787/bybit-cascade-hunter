@@ -342,23 +342,58 @@ class CascadeTradingServer:
 
     async def handle_api_history(self, request: web.Request) -> web.Response:
         symbol = request.query.get("symbol", "VELVETUSDT")
-        limit = int(request.query.get("limit", 300))
+        limit = int(request.query.get("limit", 400))
 
-        sql = f"""
+        trades_sql = f"""
             SELECT epoch_ms(exec_time) as t, price as p, side as s, size as v
             FROM trades
             WHERE symbol = '{symbol}'
             ORDER BY exec_time DESC
             LIMIT {limit}
         """
+        liq_sql = f"""
+            SELECT exchange as exch, symbol, epoch_ms(exec_time) as t, pos_side, price as p, size as v, notional_usd as usd
+            FROM liquidations
+            WHERE symbol = '{symbol}'
+            ORDER BY exec_time DESC
+            LIMIT 50
+        """
         loop = asyncio.get_event_loop()
-        df = await loop.run_in_executor(None, query_duckdb_snapshot, sql)
-        data = []
-        if not df.empty:
-            data = df.to_dict(orient="records")
-            data.reverse()
+        trades_df = await loop.run_in_executor(None, query_duckdb_snapshot, trades_sql)
+        liq_df = await loop.run_in_executor(None, query_duckdb_snapshot, liq_sql)
 
-        return web.json_response({"symbol": symbol, "trades": data})
+        trades_data = []
+        if not trades_df.empty:
+            trades_data = trades_df.to_dict(orient="records")
+            trades_data.reverse()
+
+        liq_data = []
+        if not liq_df.empty:
+            liq_data = liq_df.to_dict(orient="records")
+
+        # Also append in-memory recent liquidations for this symbol
+        mem_liqs = [l for l in self.recent_liquidations if l.get("symbol") == symbol]
+        for ml in mem_liqs:
+            ts = ml.get("timestamp", int(time.time() * 1000))
+            usd = ml.get("notional_usd", 0.0)
+            p = ml.get("price", 0.0)
+            pos_side = ml.get("pos_side", "long" if ml.get("side") == "sell" else "short")
+            exch = ml.get("exchange", "binance")
+            liq_data.append({
+                "exch": exch,
+                "symbol": symbol,
+                "t": ts,
+                "pos_side": pos_side,
+                "p": p,
+                "v": ml.get("amount", 0.0),
+                "usd": usd
+            })
+
+        return web.json_response({
+            "symbol": symbol,
+            "trades": trades_data,
+            "liquidations": liq_data
+        })
 
     async def handle_api_market_order(self, request: web.Request) -> web.Response:
         try:
