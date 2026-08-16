@@ -22,7 +22,6 @@ class CascadeTradingApp {
     this.radar = new RadarComponent('armedList', 'liqFeedList');
     this.terminal = new TerminalComponent(this);
     this.orderflow = new OrderflowComponent('alertFeed');
-    this.tunerMatrix = new TunerMatrixComponent('symbolTableBody', this);
 
     this.init();
   }
@@ -31,11 +30,7 @@ class CascadeTradingApp {
     this.chart.setSymbol(this.currentSymbol);
     this.terminal.setSymbol(this.currentSymbol);
     await this.fetchInitialState();
-    this.tunerMatrix.fetchSymbols();
     this.connectWebSocket();
-
-    // Periodic refresh
-    setInterval(() => this.tunerMatrix.fetchSymbols(), 15000);
   }
 
   async fetchInitialState() {

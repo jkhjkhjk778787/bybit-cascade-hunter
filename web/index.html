@@ -61,10 +61,10 @@
     <!-- 2. MAIN MULTI-PANE WORKSPACE -->
     <main class="main-workspace">
       
-      <!-- LEFT PANE: 2-STAGE RADAR & SYMBOL MATRIX -->
+      <!-- LEFT PANE: 2-STAGE PRECURSOR RADAR -->
       <aside class="left-pane">
         <!-- 2-Stage Precursor Radar Subpanel -->
-        <section class="radar-subpanel">
+        <section class="radar-subpanel" style="flex:1;">
           <div class="panel-header">
             <span class="panel-title">⏳ 2-Stage Precursor Radar</span>
             <span style="font-size:10px; color:var(--text-muted);">8s TTL</span>
@@ -74,29 +74,6 @@
             <div style="color:var(--text-muted); font-size:11px; padding:12px; text-align:center;">
               도화선 장전 대기 중 (Binance $200+ 감시)
             </div>
-          </div>
-        </section>
-
-        <!-- Autonomous Tuner Symbol Scoreboard Subpanel -->
-        <section class="radar-subpanel">
-          <div class="panel-header">
-            <span class="panel-title">🏆 Auto-Tuner Matrix</span>
-            <span style="font-size:10px; color:var(--accent-cyan);">1-Click Select</span>
-          </div>
-          <div class="panel-body" style="padding:0;">
-            <table class="symbol-table">
-              <thead>
-                <tr>
-                  <th>Symbol</th>
-                  <th>Price</th>
-                  <th>Ticks</th>
-                  <th>WR</th>
-                </tr>
-              </thead>
-              <tbody id="symbolTableBody">
-                <!-- Dynamic Symbol Rows inserted here -->
-              </tbody>
-            </table>
           </div>
         </section>
       </aside>
