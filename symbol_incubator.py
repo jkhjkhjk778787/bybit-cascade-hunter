@@ -24,6 +24,8 @@ from collections import deque
 from typing import Dict, Any, List, Optional
 
 import websockets
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,7 +34,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("Incubator")
 
-DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1538351496230477885/kaw1CC-ai-PenZF8luXycybltlehwlBWLTUlvql9rW9c3FL9p0s2-Nq4AVQ5H4Pwi-jJ"
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 INCUBATOR_PATH = "/home/jph/bybit_trade_collector/incubator_symbols.json"
 ACTIVE_SYMBOLS_PATH = "/home/jph/bybit_trade_collector/active_symbols.json"
 
@@ -109,6 +111,7 @@ class ShadowIncubator:
 
         self.ws_conn = None
         self.subscribed_topics = set()
+        self.ws_send_lock = asyncio.Lock()
 
     def load_incubator_data(self):
         if os.path.exists(INCUBATOR_PATH):
@@ -177,61 +180,92 @@ class ShadowIncubator:
         to_sub = list(target_topics - self.subscribed_topics)
         to_unsub = list(self.subscribed_topics - target_topics)
 
-        if to_sub:
-            await self.ws_conn.send(json.dumps({"op": "subscribe", "args": to_sub}))
-            self.subscribed_topics.update(to_sub)
-            logger.info(f"🧪 [인큐베이터 WS 추가] {len(to_sub)}개 토픽 가상 감시")
+        async with self.ws_send_lock:
+            if to_sub:
+                chunk_size = 10
+                for i in range(0, len(to_sub), chunk_size):
+                    chunk = to_sub[i:i + chunk_size]
+                    await self.ws_conn.send(json.dumps({"op": "subscribe", "args": chunk}))
+                    if i + chunk_size < len(to_sub):
+                        await asyncio.sleep(0.05)
+                self.subscribed_topics.update(to_sub)
+                logger.info(f"🧪 [인큐베이터 WS 추가] {len(to_sub)}개 토픽 가상 감시 ({len(all_syms)}개 심볼)")
 
-        if to_unsub:
-            await self.ws_conn.send(json.dumps({"op": "unsubscribe", "args": to_unsub}))
-            self.subscribed_topics.difference_update(to_unsub)
+            if to_unsub:
+                chunk_size = 10
+                for i in range(0, len(to_unsub), chunk_size):
+                    chunk = to_unsub[i:i + chunk_size]
+                    await self.ws_conn.send(json.dumps({"op": "unsubscribe", "args": chunk}))
+                    if i + chunk_size < len(to_unsub):
+                        await asyncio.sleep(0.05)
+                self.subscribed_topics.difference_update(to_unsub)
 
     async def ws_shadow_listener(self):
         """실시간 청산 감시 ➔ 가상 숏(Shadow Paper Trade) 진입 및 추적"""
         while self.is_running:
             try:
+                self.price_buffers.clear()
+                self.liq_buffers.clear()
+
                 async with websockets.connect(BYBIT_WS_URL, ping_interval=20, ping_timeout=10) as ws:
                     self.ws_conn = ws
                     self.subscribed_topics = set()
                     await self.sync_ws_subscriptions()
 
-                    async for message in ws:
-                        if not self.is_running:
-                            break
-                        data = json.loads(message)
-                        topic = data.get("topic", "")
+                    # Bybit 애플리케이션 레벨 핑 루프 (20초 주기)
+                    async def _bybit_ping_task():
+                        while self.is_running:
+                            await asyncio.sleep(20)
+                            try:
+                                async with self.ws_send_lock:
+                                    if self.ws_conn:
+                                        await self.ws_conn.send('{"op":"ping"}')
+                            except Exception:
+                                break
 
-                        if topic.startswith("tickers."):
-                            sym = topic.split(".")[1]
-                            t_data = data.get("data", {})
-                            lp = t_data.get("lastPrice")
-                            if lp:
+                    ping_task = asyncio.create_task(_bybit_ping_task())
+
+                    try:
+                        async for message in ws:
+                            if not self.is_running:
+                                break
+                            data = json.loads(message)
+                            topic = data.get("topic", "")
+
+                            if topic.startswith("tickers."):
+                                sym = topic.split(".")[1]
+                                t_data = data.get("data", {})
+                                lp = t_data.get("lastPrice")
+                                if lp:
+                                    now = time.time()
+                                    p_float = float(lp)
+                                    self.latest_prices[sym] = p_float
+                                    if sym not in self.price_buffers:
+                                        self.price_buffers[sym] = deque(maxlen=300)
+                                    self.price_buffers[sym].append((now, p_float))
+                                    while self.price_buffers[sym] and (now - self.price_buffers[sym][0][0] > 5.0):
+                                        self.price_buffers[sym].popleft()
+
+                                    # 가상 포지션 TP/SL/타임아웃 감시
+                                    await self.check_shadow_positions(sym, p_float, now)
+
+                            elif topic.startswith("liquidation.") or topic.startswith("allLiquidation."):
+                                sym = topic.split(".")[1]
+                                l_data = data.get("data", {})
+                                side = l_data.get("side") or l_data.get("S")
+                                price = float(l_data.get("price") or l_data.get("p") or 0.0)
+                                size = float(l_data.get("size") or l_data.get("v") or 0.0)
+                                liq_usd = price * size
                                 now = time.time()
-                                p_float = float(lp)
-                                self.latest_prices[sym] = p_float
-                                if sym not in self.price_buffers:
-                                    self.price_buffers[sym] = deque()
-                                self.price_buffers[sym].append((now, p_float))
-                                while self.price_buffers[sym] and (now - self.price_buffers[sym][0][0] > 5.0):
-                                    self.price_buffers[sym].popleft()
 
-                                # 가상 포지션 TP/SL/타임아웃 감시
-                                await self.check_shadow_positions(sym, p_float, now)
-
-                        elif topic.startswith("liquidation."):
-                            sym = topic.split(".")[1]
-                            l_data = data.get("data", {})
-                            side = l_data.get("side")
-                            price = float(l_data.get("price", 0.0))
-                            size = float(l_data.get("size", 0.0))
-                            liq_usd = price * size
-                            now = time.time()
-
-                            if side == "Sell" and sym in self.incubating_symbols:
-                                if sym not in self.liq_buffers:
-                                    self.liq_buffers[sym] = deque()
-                                self.liq_buffers[sym].append((now, liq_usd, price))
-                                await self.check_shadow_trigger(sym, price, now)
+                                is_long_liq = (side in ["Sell", "Buy"] and side == "Sell") or (side == "Buy" and "allLiquidation" in topic)
+                                if (side == "Sell" or is_long_liq) and sym in self.incubating_symbols:
+                                    if sym not in self.liq_buffers:
+                                        self.liq_buffers[sym] = deque(maxlen=300)
+                                    self.liq_buffers[sym].append((now, liq_usd, price))
+                                    await self.check_shadow_trigger(sym, price, now)
+                    finally:
+                        ping_task.cancel()
 
             except Exception as e:
                 logger.error(f"인큐베이터 WS 에러: {e} ➔ 2초 후 재연결")

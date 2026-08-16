@@ -29,6 +29,8 @@ from typing import Dict, Any, List
 import duckdb
 import numpy as np
 import pandas as pd
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,7 +41,7 @@ logger = logging.getLogger("AutoTuner")
 
 DB_PATH = "/home/jph/bybit_trade_collector/bybit_trades.duckdb"
 OUTPUT_CONFIG_PATH = "/home/jph/bybit_trade_collector/active_symbols.json"
-DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1538351496230477885/kaw1CC-ai-PenZF8luXycybltlehwlBWLTUlvql9rW9c3FL9p0s2-Nq4AVQ5H4Pwi-jJ"
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 TUNING_INTERVAL_SEC = 60.0
 
 
@@ -202,32 +204,36 @@ def run_continuous_two_stage_tuning() -> Dict[str, Any]:
 
                                         # 구조적 손절
                                         if cp >= sl_price:
-                                            trades.append({'win': False, 'ret': ((entry_p - sl_price)/entry_p - cost_pct)*15.0})
+                                            exit_ret = ((entry_p - sl_price)/entry_p - cost_pct)*15.0
+                                            trades.append({'win': exit_ret > 0, 'ret': exit_ret})
                                             closed = True
                                             last_trade_end_ts = ct
                                             break
 
                                         # 트레일링 스탑 익절
                                         if max_gain >= 1.0 and cur_bounce >= bounce:
-                                            trades.append({'win': True, 'ret': ((entry_p - cp)/entry_p - cost_pct)*15.0})
+                                            exit_ret = ((entry_p - cp)/entry_p - cost_pct)*15.0
+                                            trades.append({'win': exit_ret > 0, 'ret': exit_ret})
                                             closed = True
                                             last_trade_end_ts = ct
                                             break
 
                                         # 청산 소진 조기 탈출
                                         if (ct - ts_i) >= 5000 and cur_gain >= 0.35 and (ct - entry_ts) >= 8000:
-                                            trades.append({'win': True, 'ret': ((entry_p - cp)/entry_p - cost_pct)*15.0})
+                                            exit_ret = ((entry_p - cp)/entry_p - cost_pct)*15.0
+                                            trades.append({'win': exit_ret > 0, 'ret': exit_ret})
                                             closed = True
                                             last_trade_end_ts = ct
                                             break
 
                                     if not closed:
-                                        trades.append({'win': True, 'ret': ((entry_p - sub_px[-1])/entry_p - cost_pct)*15.0})
+                                        exit_ret = ((entry_p - sub_px[-1])/entry_p - cost_pct)*15.0
+                                        trades.append({'win': exit_ret > 0, 'ret': exit_ret})
                                         last_trade_end_ts = sub_ts[-1]
 
                                     bin_armed_until = 0
 
-                            if len(trades) >= 2:
+                            if len(trades) >= 5:
                                 tot = len(trades)
                                 w_c = len([t for t in trades if t['win']])
                                 wr = (w_c / tot) * 100.0

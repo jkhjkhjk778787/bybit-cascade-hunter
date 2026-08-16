@@ -30,6 +30,9 @@ from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN
 from typing import Dict, Any, Optional
 
 import websockets
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -38,7 +41,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("CascadeHunter")
 
-DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1538351496230477885/kaw1CC-ai-PenZF8luXycybltlehwlBWLTUlvql9rW9c3FL9p0s2-Nq4AVQ5H4Pwi-jJ"
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 CRED_PATH = "/home/jph/.bybit/oauth_token.json"
 ACTIVE_SYMBOLS_PATH = "/home/jph/bybit_trade_collector/active_symbols.json"
 
@@ -49,7 +52,7 @@ MAX_DAILY_LOSS_USDT = 0.60  # 당일 최대 손실 서킷브레이커
 
 BYBIT_REST_URL = "https://api.bybit.com"
 BYBIT_WS_URL = "wss://stream.bybit.com/v5/public/linear"
-BINANCE_WS_URL = "wss://fstream.binance.com/ws/!forceOrder@arr"
+BINANCE_WS_URL = "wss://fstream.binance.com/market/ws/!forceOrder@arr"
 
 
 class DiscordNotifier:
@@ -195,7 +198,7 @@ class DualExchangeCascadeHunter:
 
         # 동적 트레일링 & 소진 탈출
         self.lowest_price_seen: float = 999999.0
-        self.last_liq_event_time: float = 0.0
+        self.last_liq_event_time: float = time.time()
 
         # 🛡️ 2연속 손절 심볼 블랙리스트
         self.symbol_loss_count: Dict[str, int] = {}
@@ -204,6 +207,7 @@ class DualExchangeCascadeHunter:
         # 일일 손실 서킷브레이커
         self.daily_pnl_usdt: float = 0.0
         self.is_circuit_breaker_triggered = False
+        self._last_reset_date: str = time.strftime("%Y-%m-%d")
 
         # 버퍼
         self.bybit_liq_buffers: Dict[str, deque] = {}
@@ -212,6 +216,7 @@ class DualExchangeCascadeHunter:
 
         self.bybit_ws_conn = None
         self.bybit_subscribed_topics = set()
+        self.ws_send_lock = asyncio.Lock()
         self.last_known_pnl_id = ""
 
     def load_instruments_meta(self):
@@ -242,7 +247,13 @@ class DualExchangeCascadeHunter:
         d_step = Decimal(str(step))
         raw_qty = Decimal(str(notional)) / Decimal(str(price))
         rounded = (raw_qty / d_step).quantize(Decimal('1'), rounding=ROUND_DOWN) * d_step
-        if rounded < min_q: rounded = min_q
+        if rounded < min_q:
+            # minQty로 올릴 경우 실제 노셔널이 설정의 3배 초과 시 진입 거부
+            actual_notional = float(min_q) * price
+            if actual_notional > notional * 3.0:
+                logger.warning(f"⚠️ [{symbol}] minQty 강제 올림 시 노셔널 ${actual_notional:.1f} > 한도 ${notional * 3.0:.1f} ➔ 진입 거부")
+                return "0"
+            rounded = min_q
         return format(rounded.normalize(), 'f') if '.' in str(step) else str(int(rounded))
 
     def load_active_symbols_from_disk(self) -> bool:
@@ -356,49 +367,71 @@ class DualExchangeCascadeHunter:
         """바이비트 실시간 틱/청산 감시 ➔ 2단계 확증 즉시 숏 격발!"""
         while self.is_running:
             try:
+                # 재연결 시 과거 가격 버퍼를 클리어하여 단절 전후 갭으로 인한 오신호 방지
+                self.bybit_price_buffers.clear()
+                self.bybit_liq_buffers.clear()
+
                 async with websockets.connect(BYBIT_WS_URL, ping_interval=20, ping_timeout=10) as ws:
                     self.bybit_ws_conn = ws
                     self.bybit_subscribed_topics = set()
                     await self.sync_bybit_subscriptions()
 
-                    async for message in ws:
-                        if not self.is_running: break
-                        data = json.loads(message)
-                        topic = data.get("topic", "")
+                    # Bybit 애플리케이션 레벨 핑 루프 (20초 주기)
+                    async def _bybit_ping_task():
+                        while self.is_running:
+                            await asyncio.sleep(20)
+                            try:
+                                async with self.ws_send_lock:
+                                    if self.bybit_ws_conn:
+                                        await self.bybit_ws_conn.send('{"op":"ping"}')
+                            except Exception:
+                                break
 
-                        if topic.startswith("tickers."):
-                            sym = topic.split(".")[1]
-                            t_data = data.get("data", {})
-                            lp = t_data.get("lastPrice")
-                            if lp:
+                    ping_task = asyncio.create_task(_bybit_ping_task())
+
+                    try:
+                        async for message in ws:
+                            if not self.is_running: break
+                            data = json.loads(message)
+                            topic = data.get("topic", "")
+
+                            if topic.startswith("tickers."):
+                                sym = topic.split(".")[1]
+                                t_data = data.get("data", {})
+                                lp = t_data.get("lastPrice")
+                                if lp:
+                                    now = time.time()
+                                    p_float = float(lp)
+                                    self.latest_prices[sym] = p_float
+                                    if sym not in self.bybit_price_buffers:
+                                        self.bybit_price_buffers[sym] = deque(maxlen=300)
+                                    self.bybit_price_buffers[sym].append((now, p_float))
+                                    while self.bybit_price_buffers[sym] and (now - self.bybit_price_buffers[sym][0][0] > 5.0):
+                                        self.bybit_price_buffers[sym].popleft()
+
+                                    # 가격 붕괴 확증 검사
+                                    await self.check_bybit_confirmation(sym, p_float, now, event_type="TICK")
+
+                            elif topic.startswith("liquidation.") or topic.startswith("allLiquidation."):
+                                sym = topic.split(".")[1]
+                                l_data = data.get("data", {})
+                                side = l_data.get("side") or l_data.get("S")
+                                price = float(l_data.get("price") or l_data.get("p") or 0.0)
+                                size = float(l_data.get("size") or l_data.get("v") or 0.0)
+                                liq_usd = price * size
                                 now = time.time()
-                                p_float = float(lp)
-                                self.latest_prices[sym] = p_float
-                                if sym not in self.bybit_price_buffers:
-                                    self.bybit_price_buffers[sym] = deque()
-                                self.bybit_price_buffers[sym].append((now, p_float))
-                                while self.bybit_price_buffers[sym] and (now - self.bybit_price_buffers[sym][0][0] > 5.0):
-                                    self.bybit_price_buffers[sym].popleft()
 
-                                # 가격 붕괴 확증 검사
-                                await self.check_bybit_confirmation(sym, p_float, now, event_type="TICK")
-
-                        elif topic.startswith("liquidation."):
-                            sym = topic.split(".")[1]
-                            l_data = data.get("data", {})
-                            side = l_data.get("side")
-                            price = float(l_data.get("price", 0.0))
-                            size = float(l_data.get("size", 0.0))
-                            liq_usd = price * size
-                            now = time.time()
-
-                            if side == "Sell" and sym in self.symbol_configs:
-                                if sym not in self.bybit_liq_buffers:
-                                    self.bybit_liq_buffers[sym] = deque()
-                                self.bybit_liq_buffers[sym].append((now, liq_usd, price))
-                                self.last_liq_event_time = now
-                                # Bybit 소액 청산 확증 검사
-                                await self.check_bybit_confirmation(sym, price, now, event_type="LIQ", liq_usd=liq_usd)
+                                # Bybit: 'Buy' side indicates long position liquidated (forced market sell)
+                                is_long_liq = (side in ["Sell", "Buy"] and side == "Sell") or (side == "Buy" and "allLiquidation" in topic)
+                                if (side == "Sell" or is_long_liq) and sym in self.symbol_configs:
+                                    if sym not in self.bybit_liq_buffers:
+                                        self.bybit_liq_buffers[sym] = deque(maxlen=300)
+                                    self.bybit_liq_buffers[sym].append((now, liq_usd, price))
+                                    self.last_liq_event_time = now
+                                    # Bybit 소액 청산 확증 검사
+                                    await self.check_bybit_confirmation(sym, price, now, event_type="LIQ", liq_usd=liq_usd)
+                    finally:
+                        ping_task.cancel()
 
             except Exception as e:
                 logger.error(f"Bybit WS 에러: {e} ➔ 2초 후 재연결...")
@@ -410,20 +443,48 @@ class DualExchangeCascadeHunter:
         to_sub = list(target - self.bybit_subscribed_topics)
         to_unsub = list(self.bybit_subscribed_topics - target)
 
-        if to_sub:
-            await self.bybit_ws_conn.send(json.dumps({"op": "subscribe", "args": to_sub}))
-            self.bybit_subscribed_topics.update(to_sub)
-            logger.info(f"📡 [Bybit WS 구독] {len(to_sub)}개 토픽 추가")
+        async with self.ws_send_lock:
+            if to_sub:
+                chunk_size = 10
+                for i in range(0, len(to_sub), chunk_size):
+                    chunk = to_sub[i:i + chunk_size]
+                    await self.bybit_ws_conn.send(json.dumps({"op": "subscribe", "args": chunk}))
+                    if i + chunk_size < len(to_sub):
+                        await asyncio.sleep(0.05)
+                self.bybit_subscribed_topics.update(to_sub)
+                logger.info(f"📡 [Bybit WS 구독] {len(to_sub)}개 토픽 추가 ({len(self.monitored_symbols)}개 심볼)")
 
-        if to_unsub:
-            await self.bybit_ws_conn.send(json.dumps({"op": "unsubscribe", "args": to_unsub}))
-            self.bybit_subscribed_topics.difference_update(to_unsub)
+            if to_unsub:
+                chunk_size = 10
+                for i in range(0, len(to_unsub), chunk_size):
+                    chunk = to_unsub[i:i + chunk_size]
+                    await self.bybit_ws_conn.send(json.dumps({"op": "unsubscribe", "args": chunk}))
+                    if i + chunk_size < len(to_unsub):
+                        await asyncio.sleep(0.05)
+                self.bybit_subscribed_topics.difference_update(to_unsub)
 
     async def hot_reload_loop(self):
         while self.is_running:
             await asyncio.sleep(3.0)
-            if self.load_active_symbols_from_disk():
-                await self.sync_bybit_subscriptions()
+            try:
+                # 일일 PnL 자정 리셋
+                today = time.strftime("%Y-%m-%d")
+                if today != self._last_reset_date:
+                    logger.info(f"🔄 [일일 리셋] 날짜 변경 감지 ({self._last_reset_date} ➔ {today}) | 누적 손익 {self.daily_pnl_usdt:+.4f}U 리셋")
+                    self.daily_pnl_usdt = 0.0
+                    self.is_circuit_breaker_triggered = False
+                    self._last_reset_date = today
+
+                # binance_armed 만료 키 주기적 청소 (TTL Cleaner)
+                now = time.time()
+                expired_keys = [k for k, v in self.binance_armed.items() if now > v]
+                for k in expired_keys:
+                    del self.binance_armed[k]
+
+                if self.load_active_symbols_from_disk():
+                    await self.sync_bybit_subscriptions()
+            except Exception as e:
+                logger.error(f"[hot_reload_loop 에러] {e}")
 
     async def check_bybit_confirmation(self, symbol: str, current_price: float, now: float, event_type: str, liq_usd: float = 0.0):
         """2단계 확증 검사: 바이낸스 장전 중 + Bybit 붕괴 신호 ➔ 0ms 숏 발사!"""
@@ -495,6 +556,9 @@ class DualExchangeCascadeHunter:
             tp_str = self.format_price(symbol, tp_raw)
             sl_str = self.format_price(symbol, sl_raw)
             qty_str = self.format_qty(symbol, NOTIONAL_PER_TRADE, px)
+            if qty_str == "0":
+                logger.warning(f"⚠️ [{symbol}] 수량 산출 불가 (minQty 과다) ➔ 진입 스킵")
+                return
 
             link_id = f"CASCADE_S_{int(now*1000)}"
             res = self.client.place_market_short_with_tpsl(symbol, qty_str, tp_str, sl_str, link_id)
@@ -517,6 +581,7 @@ class DualExchangeCascadeHunter:
                 )
             else:
                 logger.error(f"⚠️ [주문 실패] {symbol} 거절: {res.get('retMsg')}")
+                self.cooldown_until = now + 30.0
 
     async def position_guard_loop(self):
         while self.is_running:
@@ -556,11 +621,16 @@ class DualExchangeCascadeHunter:
                 # 1. 지능형 트레일링 스탑
                 if max_gain_pct >= min_gain_req and bounce_pct >= bounce_req:
                     logger.warning(f"🎯 [{self.active_symbol} 트레일링 익절] 최고 +{max_gain_pct:.2f}% ➔ 반등 {bounce_pct:.2f}% 시장가 익절!")
-                    self.client.close_position_market(self.active_symbol)
-                    self.in_position = False
+                    close_res = self.client.close_position_market(self.active_symbol)
+                    if close_res.get("retCode") != 0:
+                        logger.error(f"⚠️ [{self.active_symbol}] 청산 실패: {close_res.get('retMsg')} ➔ 포지션 유지")
+                        continue
                     sym = self.active_symbol
+                    self.in_position = False
                     self.active_symbol = None
                     self.cooldown_until = now + 45.0
+                    await asyncio.sleep(0.5)
+                    await self.check_trade_result(sym)
                     await self.notifier.async_send_embed(
                         title=f"🎯 [트레일링 익절] {sym}",
                         description=f"최고 낙폭 `+{max_gain_pct:.2f}%` ➔ 반등 `{bounce_pct:.2f}%` 감지 시장가 익절",
@@ -572,11 +642,16 @@ class DualExchangeCascadeHunter:
                 time_since_liq = now - self.last_liq_event_time
                 if time_since_liq >= 5.0 and pnl_pct >= 0.35 and elapsed >= 8.0:
                     logger.warning(f"⏱️ [{self.active_symbol} 청산 소진 익절] 5초간 청산 멈춤 & 수익 +{pnl_pct:.2f}% ➔ 시장가 조기 익절!")
-                    self.client.close_position_market(self.active_symbol)
-                    self.in_position = False
+                    close_res = self.client.close_position_market(self.active_symbol)
+                    if close_res.get("retCode") != 0:
+                        logger.error(f"⚠️ [{self.active_symbol}] 청산 실패: {close_res.get('retMsg')} ➔ 포지션 유지")
+                        continue
                     sym = self.active_symbol
+                    self.in_position = False
                     self.active_symbol = None
                     self.cooldown_until = now + 45.0
+                    await asyncio.sleep(0.5)
+                    await self.check_trade_result(sym)
                     await self.notifier.async_send_embed(
                         title=f"⏱️ [소진 탈출] {sym}",
                         description=f"청산 멈춤 ➔ `+{pnl_pct:.2f}%` 조기 익절",
@@ -587,11 +662,16 @@ class DualExchangeCascadeHunter:
                 # 3. 절대 타임아웃
                 if elapsed >= self.active_timeout_sec:
                     logger.warning(f"⏱️ [{self.active_symbol} 타임아웃] {elapsed:.1f}초 경과 ➔ 시장가 탈출!")
-                    self.client.close_position_market(self.active_symbol)
-                    self.in_position = False
+                    close_res = self.client.close_position_market(self.active_symbol)
+                    if close_res.get("retCode") != 0:
+                        logger.error(f"⚠️ [{self.active_symbol}] 청산 실패: {close_res.get('retMsg')} ➔ 포지션 유지")
+                        continue
                     sym = self.active_symbol
+                    self.in_position = False
                     self.active_symbol = None
                     self.cooldown_until = now + 45.0
+                    await asyncio.sleep(0.5)
+                    await self.check_trade_result(sym)
                     await self.notifier.async_send_embed(
                         title=f"⏱️ [타임아웃] {sym}",
                         description=f"제한시간 `{self.active_timeout_sec:.0f}s` 경과 시장가 종료",

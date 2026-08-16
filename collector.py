@@ -143,26 +143,31 @@ class IntegratedMarketCollector:
         for s in to_add:
             self.subscribed_symbols.add(s)
 
-        # 1. Bybit 체결 틱 웹소켓 구독 추가
+        # 1. Bybit 체결 틱 웹소켓 구독 추가 (10개씩 배치 분할)
         if self.ws is not None and not self.ws.closed:
             topics = [f"publicTrade.{s}" for s in to_add]
-            msg = orjson.dumps({
-                "op": "subscribe",
-                "args": topics
-            }).decode("utf-8")
-            try:
-                await self.ws.send(msg)
-                log(f"[WS-TRADE] 동적 구독 추가 성공: {', '.join(to_add)}")
-            except Exception as e:
-                log(f"[WS-TRADE WARN] 동적 구독 전송 실패: {e}")
+            chunk_size = 10
+            for i in range(0, len(topics), chunk_size):
+                chunk = topics[i:i + chunk_size]
+                msg = orjson.dumps({
+                    "op": "subscribe",
+                    "args": chunk
+                }).decode("utf-8")
+                try:
+                    await self.ws.send(msg)
+                    if i + chunk_size < len(topics):
+                        await asyncio.sleep(0.05)
+                except Exception as e:
+                    log(f"[WS-TRADE WARN] 동적 구독 전송 실패: {e}")
+            log(f"[WS-TRADE] 동적 구독 추가 완료: {', '.join(to_add)}")
 
-        # 2. Bybit 청산 스트림 워커에 신규 심볼 동적 구독 추가
+        # 2. 3대 거래소 청산 스트림 워커에 신규 심볼 동적 등록
         if self.liq_stream and self.liq_stream._workers:
             for worker in self.liq_stream._workers:
-                if isinstance(worker, BybitLiquidationWorker):
-                    for s in to_add:
+                for s in to_add:
+                    if hasattr(worker, 'normalized_symbols') and worker.normalized_symbols is not None:
                         worker.normalized_symbols.add(s)
-                    log(f"[WS-LIQ] Bybit 청산 스트림에 심볼 추가: {', '.join(to_add)}")
+            log(f"[WS-LIQ] 3대 거래소 청산 스트림에 심볼 추가 완료: {', '.join(to_add)}")
 
     async def ranker_scanner_worker(self):
         if not config.ENABLE_RANKER_SCANNER:

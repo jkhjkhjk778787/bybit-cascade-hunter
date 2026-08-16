@@ -25,6 +25,8 @@ from datetime import datetime, timezone
 from collections import deque
 import websockets
 import orjson
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 
 # 로깅 설정
 logging.basicConfig(
@@ -36,7 +38,7 @@ logger = logging.getLogger("cow_grid_trader")
 
 # 자격증명 및 디스코드 웹훅 경로
 CRED_PATH = "/home/jph/.bybit/oauth_token.json"
-DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1538351496230477885/kaw1CC-ai-PenZF8luXycybltlehwlBWLTUlvql9rW9c3FL9p0s2-Nq4AVQ5H4Pwi-jJ"
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 
 SYMBOL = "COWUSDT"
 LEVERAGE = 15.0
