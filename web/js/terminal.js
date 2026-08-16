@@ -117,7 +117,15 @@ export class TerminalComponent {
       if (data.success) {
         this.showToast(`✅ [체결 성공] ${this.selectedSymbol} ${this.selectedSide} $${this.orderUsd} (${this.leverage}x)`, 'success');
       } else {
-        this.showToast(`❌ [주문 실패] ${data.response?.retMsg || data.error}`, 'error');
+        let errStr = data.response?.retMsg || data.error || '알 수 없는 오류';
+        if (errStr.includes('ab not enough')) {
+          errStr = '가용 잔고(Available Balance) 부족 (계좌 잔고 확인 필요)';
+        } else if (errStr.includes('minNotional') || errStr.includes('Order value')) {
+          errStr = '최소 주문 가치($5.0) 미달';
+        } else if (errStr.includes('Qty invalid') || errStr.includes('qty')) {
+          errStr = '주문 수량 단위 불일치';
+        }
+        this.showToast(`❌ [주문 실패] ${errStr}`, 'error');
       }
     } catch (e) {
       this.showToast(`❌ 네트워크 에러: ${e}`, 'error');

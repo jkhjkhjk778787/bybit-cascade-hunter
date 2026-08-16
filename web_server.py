@@ -226,7 +226,17 @@ class BybitTradingService:
         })
 
         spec = self.get_symbol_spec(symbol)
-        
+
+        # 1. 가용 잔고(Available Balance) 자동 보정 (초과 주문 시 가용 잔고 내로 자동 스케일링)
+        try:
+            wb = self.get_wallet_balance()
+            avail = float(wb.get("availableBalance", 0.0))
+            if avail > 0.1 and order_value_usdt > avail:
+                order_value_usdt = max(0.5, round(avail * 0.95, 2))
+                logger.info(f"💡 [{symbol}] 가용 잔고(${avail:.2f}) 초과 주문 감지 ➔ 주문 증거금 ${order_value_usdt:.2f}로 자동 보정")
+        except Exception:
+            pass
+
         t_res = self._request("GET", "/v5/market/tickers", {"category": "linear", "symbol": symbol})
         last_price = 0.0
         if t_res.get("retCode") == 0:
