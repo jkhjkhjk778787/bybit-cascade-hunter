@@ -2,10 +2,10 @@
  * Master Application Controller & WebSocket Connection Manager
  */
 
-import { ProChart } from './chart.js?v=20260817_0540';
-import { RadarComponent } from './radar.js?v=20260817_0540';
-import { TerminalComponent } from './terminal.js?v=20260817_0540';
-import { OrderflowComponent } from './orderflow.js?v=20260817_0540';
+import { ProChart } from './chart.js?v=20260817_0550';
+import { RadarComponent } from './radar.js?v=20260817_0550';
+import { TerminalComponent } from './terminal.js?v=20260817_0550';
+import { OrderflowComponent } from './orderflow.js?v=20260817_0550';
 
 class CascadeTradingApp {
   constructor() {
@@ -109,9 +109,11 @@ class CascadeTradingApp {
     const wsUrl = `${protocol}//${window.location.host}/ws/live`;
 
     this.ws = new WebSocket(wsUrl);
+    this.ws.binaryType = 'arraybuffer';
+    const decoder = new TextDecoder('utf-8');
 
     this.ws.onopen = () => {
-      console.log('⚡ Connected to Trading Suite WebSocket');
+      console.log('⚡ Connected to HFT Binary Trading Suite WebSocket');
       document.getElementById('dotBackend').className = 'conn-dot online';
       document.getElementById('dotBinance').className = 'conn-dot online';
       document.getElementById('dotBybit').className = 'conn-dot online';
@@ -119,7 +121,12 @@ class CascadeTradingApp {
 
     this.ws.onmessage = (event) => {
       try {
-        const msg = JSON.parse(event.data);
+        let msg;
+        if (event.data instanceof ArrayBuffer) {
+          msg = JSON.parse(decoder.decode(event.data));
+        } else {
+          msg = JSON.parse(event.data);
+        }
         this.handleWsMessage(msg);
       } catch (e) {
         console.error('WS parse error:', e);

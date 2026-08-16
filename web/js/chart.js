@@ -5,6 +5,13 @@
  * [Bot] Dual-Exchange Cumulative Volume Delta (CVD Flow)
  */
 
+// 🚀 Pre-cached high performance font constants (Zero CSS font re-parsing overhead)
+const FONT_GRID = 'bold 12px "JetBrains Mono", monospace';
+const FONT_PRICE = 'bold 11.5px "JetBrains Mono", monospace';
+const FONT_CVD_AXIS = 'bold 12.5px "JetBrains Mono", monospace';
+const FONT_LIQ_BADGE = 'bold 10px "JetBrains Mono", monospace';
+const FONT_WAITING = '12px "JetBrains Mono", monospace';
+
 export class ProChart {
   constructor(liqCanvasId = 'centerLiqCanvas', tickCanvasId = 'tick1sCanvas', cvdCanvasId = 'cvdCanvas') {
     this.liqCanvas = document.getElementById(liqCanvasId);
@@ -343,7 +350,9 @@ export class ProChart {
       usd: usd,
       exch: (ev.exchange || 'bin').slice(0, 3).toUpperCase(),
     });
-    if (this.liquidations.length > 60) this.liquidations.shift();
+    if (this.liquidations.length > 80) {
+      this.liquidations = this.liquidations.slice(-60);
+    }
 
     // Accumulate into latest time-series bucket
     if (this.liqTimeSeries.length > 0) {
@@ -686,7 +695,7 @@ export class ProChart {
       const p = lo + (i / 4) * (hi - lo);
       const y = yOf(p);
       ctx.beginPath(); ctx.moveTo(this.pad.left, y); ctx.lineTo(w - this.pad.right, y); ctx.stroke();
-      ctx.fillStyle = '#94a3b8'; ctx.font = 'bold 12px "JetBrains Mono",monospace'; ctx.textAlign = 'left';
+      ctx.fillStyle = '#94a3b8'; ctx.font = FONT_GRID; ctx.textAlign = 'left';
       ctx.fillText(this._fmt(p), w - this.pad.right + 6, y + 4);
     }
   }
@@ -710,7 +719,7 @@ export class ProChart {
     const side = liq.isLong ? 'LONG' : 'SHORT';
     const usd = liq.usd >= 1000 ? `$${(liq.usd / 1000).toFixed(1)}k` : `$${Math.round(liq.usd)}`;
     const txt = `${liq.exch} ${side} ${usd}`;
-    ctx.font = 'bold 10px "JetBrains Mono",monospace';
+    ctx.font = FONT_LIQ_BADGE;
     const tw = ctx.measureText(txt).width + 10;
     const by = liq.isLong ? y - r - 18 : y + r + 4;
     ctx.fillStyle = col;
@@ -730,7 +739,7 @@ export class ProChart {
     if (price != null) {
       ctx.fillStyle = 'hsl(192,95%,50%)';
       ctx.fillRect(w - this.pad.right + 1, y - 10, 76, 20);
-      ctx.fillStyle = '#0a0e17'; ctx.font = 'bold 11.5px "JetBrains Mono",monospace'; ctx.textAlign = 'center';
+      ctx.fillStyle = '#0a0e17'; ctx.font = FONT_PRICE; ctx.textAlign = 'center';
       ctx.fillText(this._fmt(price), w - this.pad.right + 38, y + 4);
     }
   }
@@ -745,7 +754,7 @@ export class ProChart {
 
     const pts = this.cvdPoints;
     if (!pts || pts.length < 1) {
-      ctx.fillStyle = '#7a8ba6'; ctx.font = '12px "JetBrains Mono",monospace';
+      ctx.fillStyle = '#7a8ba6'; ctx.font = FONT_WAITING;
       ctx.textAlign = 'center';
       ctx.fillText(`${this.symbol} 실시간 듀얼 CVD 체결 델타 집계 중...`, w / 2, h / 2);
       return;
@@ -782,7 +791,7 @@ export class ProChart {
       const v = minVal + (i / 3) * (maxVal - minVal);
       const y = yOf(v);
       ctx.beginPath(); ctx.moveTo(this.pad.left, y); ctx.lineTo(w - this.pad.right, y); ctx.stroke();
-      ctx.fillStyle = '#94a3b8'; ctx.font = 'bold 12.5px "JetBrains Mono",monospace'; ctx.textAlign = 'left';
+      ctx.fillStyle = '#94a3b8'; ctx.font = FONT_CVD_AXIS; ctx.textAlign = 'left';
       ctx.fillText(`$${this._fmtUsd(v)}`, w - this.pad.right + 6, y + 4);
     }
 

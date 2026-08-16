@@ -154,10 +154,18 @@ class BybitTradingService:
     def get_symbol_spec(self, symbol: str) -> Dict[str, Any]:
         if symbol in self.symbol_specs:
             return self.symbol_specs[symbol]
-        # 온디맨드 단일 심볼 조회
+        # 즉시 안전 기본 규격 등록 및 반환 (이벤트 루프 0ms 블로킹 방지)
+        default_spec = {
+            "min_qty": 0.001, "qty_step": 0.001, "min_qty_str": "0.001",
+            "qty_step_str": "0.001", "tick_size_str": "0.0001",
+            "min_notional": 5.0, "tick_size": 0.0001, "max_leverage": 20.0,
+            "max_leverage_str": "20"
+        }
+        self.symbol_specs[symbol] = default_spec
+        # 초고속 0.5초 타임아웃 온디맨드 스펙 갱신 시도
         try:
             url = f"{BYBIT_REST_URL}/v5/market/instruments-info?category=linear&symbol={symbol}"
-            with urllib.request.urlopen(url, timeout=3) as resp:
+            with urllib.request.urlopen(url, timeout=0.8) as resp:
                 data = json.loads(resp.read().decode('utf-8'))
                 items = data.get("result", {}).get("list", [])
                 if items:
@@ -185,11 +193,7 @@ class BybitTradingService:
                     return spec
         except Exception:
             pass
-        return {
-            "min_qty": 0.001, "qty_step": 0.001, "min_qty_str": "0.001",
-            "qty_step_str": "0.001", "tick_size_str": "0.0001", "min_notional": 5.0, "tick_size": 0.0001,
-            "max_leverage": 20.0, "max_leverage_str": "20"
-        }
+        return default_spec
 
     def get_wallet_balance(self) -> Dict[str, Any]:
         res = self._request("GET", "/v5/account/wallet-balance", {"accountType": "UNIFIED"})
@@ -712,15 +716,67 @@ async def no_cache_middleware(request: web.Request, handler):
     return resp
 
 
+class ClientWriter:
+    """각 웹소켓 클라이언트별 독립 비동기 큐 워커 (Slow Consumer 교착 완전 차단 + Drop-Oldest 고빈도 드레인)"""
+    def __init__(self, ws: web.WebSocketResponse):
+        self.ws = ws
+        self.queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=128)
+        self.is_alive = True
+        self._task: Optional[asyncio.Task] = None
+
+    def start(self):
+        self._task = asyncio.create_task(self._writer_loop())
+
+    async def _writer_loop(self):
+        try:
+            while self.is_alive and not self.ws.closed:
+                msg_bytes = await self.queue.get()
+                try:
+                    await self.ws.send_bytes(msg_bytes)
+                except Exception:
+                    self.is_alive = False
+                    break
+        except asyncio.CancelledError:
+            pass
+        finally:
+            self.is_alive = False
+
+    def enqueue(self, msg_bytes: bytes):
+        if not self.is_alive or self.ws.closed:
+            return
+        if self.queue.full():
+            try:
+                self.queue.get_nowait()  # Drop oldest high-frequency delta to keep buffer fresh
+            except Exception:
+                pass
+        try:
+            self.queue.put_nowait(msg_bytes)
+        except Exception:
+            pass
+
+    async def close(self):
+        self.is_alive = False
+        if self._task and not self._task.done():
+            self._task.cancel()
+            try:
+                await self._task
+            except Exception:
+                pass
+
+
 class CascadeTradingServer:
     def __init__(self, port: int = 8080):
         self.port = port
         self.app = web.Application(middlewares=[no_cache_middleware])
         self.trader = BybitTradingService(CRED_PATH)
         self.liq_manager = InMemoryLiquidationManager(DB_PATH)
-        self.ws_clients: Set[web.WebSocketResponse] = set()
+        self.client_writers: Dict[web.WebSocketResponse, ClientWriter] = {}
         self.is_running = True
         self.auto_trade_enabled = False
+
+    @property
+    def ws_clients(self) -> Set[web.WebSocketResponse]:
+        return set(self.client_writers.keys())
 
         self._http_session: Optional[ClientSession] = None
         self._chart_cache = OrderedDict()
@@ -1022,14 +1078,16 @@ class CascadeTradingServer:
     async def handle_ws(self, request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse(heartbeat=15.0)
         await ws.prepare(request)
-        self.ws_clients.add(ws)
-        logger.info(f"🌐 [Web UI 접속] 클라이언트 연결됨 (총 {len(self.ws_clients)}명)")
+        writer = ClientWriter(ws)
+        writer.start()
+        self.client_writers[ws] = writer
+        logger.info(f"🌐 [Web UI 접속] HFT 바이너리 스트림 클라이언트 연결됨 (총 {len(self.client_writers)}명)")
 
         try:
             balance = await asyncio.to_thread(self.trader.get_wallet_balance)
             positions = await asyncio.to_thread(self.trader.get_positions)
             recent_liqs = self.liq_manager.get_recent_liquidations(limit=8)
-            await ws.send_str(orjson.dumps({
+            snap_bytes = orjson.dumps({
                 "type": "SNAPSHOT",
                 "balance": balance,
                 "positions": positions,
@@ -1037,7 +1095,8 @@ class CascadeTradingServer:
                 "armed": self.armed_status,
                 "recent_liqs": recent_liqs,
                 "auto_trade": self.auto_trade_enabled
-            }).decode('utf-8'))
+            })
+            writer.enqueue(snap_bytes)
         except Exception:
             pass
 
@@ -1045,31 +1104,36 @@ class CascadeTradingServer:
             async for msg in ws:
                 if msg.type == WSMsgType.TEXT:
                     data = orjson.loads(msg.data)
-                    action = data.get("action")
-                    if action == "PING":
-                        await ws.send_str('{"type":"PONG"}')
+                    if data.get("action") == "PING":
+                        writer.enqueue(b'{"type":"PONG"}')
+                elif msg.type == WSMsgType.BINARY:
+                    data = orjson.loads(msg.data)
+                    if data.get("action") == "PING":
+                        writer.enqueue(b'{"type":"PONG"}')
                 elif msg.type == WSMsgType.ERROR:
                     logger.error(f"WS 에러: {ws.exception()}")
         finally:
-            self.ws_clients.discard(ws)
-            logger.info(f"🌐 [Web UI 단절] 클라이언트 퇴장 (남은 접속자: {len(self.ws_clients)}명)")
+            writer_to_del = self.client_writers.pop(ws, None)
+            if writer_to_del:
+                await writer_to_del.close()
+            logger.info(f"🌐 [Web UI 단절] 클라이언트 퇴장 (남은 접속자: {len(self.client_writers)}명)")
 
         return ws
 
     async def broadcast(self, payload: Dict[str, Any]):
-        if not self.ws_clients:
+        if not self.client_writers:
             return
-        msg_str = orjson.dumps(payload).decode('utf-8')
-        results = await asyncio.gather(
-            *[ws.send_str(msg_str) for ws in self.ws_clients],
-            return_exceptions=True
-        )
-        dead_clients = set()
-        for ws, r in zip(list(self.ws_clients), results):
-            if isinstance(r, Exception):
-                dead_clients.add(ws)
-        for d in dead_clients:
-            self.ws_clients.discard(d)
+        msg_bytes = orjson.dumps(payload)
+        dead = []
+        for ws, writer in list(self.client_writers.items()):
+            if not writer.is_alive or ws.closed:
+                dead.append(ws)
+            else:
+                writer.enqueue(msg_bytes)
+        for ws in dead:
+            writer = self.client_writers.pop(ws, None)
+            if writer:
+                await writer.close()
 
     async def run_liquidation_stream(self):
         """바이낸스 & 바이비트 2대 거래소 실시간 청산 스트림 (TOP 20 심볼 타겟 필터링)"""
