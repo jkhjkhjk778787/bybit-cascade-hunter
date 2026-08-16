@@ -105,7 +105,7 @@ export class ProChart {
 
     let hovered = null;
     for (const b of this.liqBarCoords) {
-      if (mx >= b.x - 2 && mx <= b.x + b.width + 2 && my >= 0 && my <= (this._lh || this.liqCanvas.height) - 15) {
+      if (mx >= b.x - 4 && mx <= b.x + b.width + 4) {
         hovered = b;
         break;
       }
@@ -118,15 +118,20 @@ export class ProChart {
       if (this._tooltipEl) {
         const it = hovered.item;
         const total = (it.long_usd || 0) + (it.short_usd || 0);
+        const pVal = parseFloat(it.close_price || it.avg_price || it.price || 0);
+        const pDec = pVal > 10 ? 2 : pVal > 0.1 ? 4 : 6;
         this._tooltipEl.innerHTML = `
-          <div style="font-weight:800; color:var(--brand-cyan); margin-bottom:2px;">⏱️ ${it.time_str} (${it.count || 0}건 청산)</div>
+          <div style="font-weight:800; color:var(--brand-cyan); margin-bottom:3px; display:flex; justify-content:space-between; gap:10px;">
+            <span>⏱️ ${it.time_str}</span>
+            <span style="color:#ffffff;">📈 $${pVal > 0 ? pVal.toFixed(pDec) : '--'}</span>
+          </div>
           <div style="color:var(--short-red); font-size:10px;">🔴 롱 청산: <b>$${this._fmtUsd(it.long_usd || 0)}</b></div>
           <div style="color:var(--long-green); font-size:10px;">🟢 숏 청산: <b>$${this._fmtUsd(it.short_usd || 0)}</b></div>
-          <div style="color:var(--warn-amber); font-size:10px; margin-top:2px;">💰 합계: <b>$${this._fmtUsd(total)}</b></div>
+          <div style="color:var(--warn-amber); font-size:10px; margin-top:2px;">💰 청산액: <b>$${this._fmtUsd(total)}</b> (${it.count || 0}건)</div>
         `;
         this._tooltipEl.style.display = 'block';
-        this._tooltipEl.style.left = `${hovered.x + hovered.width / 2}px`;
-        this._tooltipEl.style.top = `${Math.max(10, hovered.y - 10)}px`;
+        this._tooltipEl.style.left = `${Math.min((this._lw || 600) - 150, Math.max(10, hovered.x + hovered.width / 2 - 70))}px`;
+        this._tooltipEl.style.top = `${Math.max(10, (hovered.priceY || hovered.y) - 45)}px`;
       }
     } else if (!hovered && this.liqHoverIndex !== -1) {
       this.liqHoverIndex = -1;
@@ -421,7 +426,7 @@ export class ProChart {
   }
 
   /* ====================================================================
-     TOP: REAL-TIME & HISTORICAL LIQUIDATION DISTRIBUTION (Replaced 1-Min Candle)
+     TOP: DUAL-AXIS PRICE TREND & LIQUIDATION DISTRIBUTION COMBO CHART
      ==================================================================== */
   _drawLiquidationDist() {
     const ctx = this.liqCtx, w = this._lw, h = this._lh;
@@ -441,89 +446,102 @@ export class ProChart {
 
     const pW = w - this.pad.left - this.pad.right;
     const pH = h - this.pad.top - this.pad.bottom;
+    const baseY = this.pad.top + pH;
 
-    // Find max total USD
+    // 1. Calculate Price Scale (OHLC / Close Prices)
+    const fallbackPrice = this.latestPrice > 0 ? this.latestPrice : 1.0;
+    const validPrices = series.map(s => parseFloat(s.close_price || s.avg_price || s.price || 0)).filter(p => p > 0);
+    const minPrice = validPrices.length ? Math.min(...validPrices) : fallbackPrice * 0.995;
+    const maxPrice = validPrices.length ? Math.max(...validPrices) : fallbackPrice * 1.005;
+    const pSpread = (maxPrice - minPrice) || (minPrice * 0.008);
+    const pMin = minPrice - (pSpread * 0.08);
+    const pMax = maxPrice + (pSpread * 0.12);
+    const pRange = pMax - pMin;
+
+    // 2. Calculate Liquidation Volume Scale
     let maxUsd = 0;
     for (const item of series) {
       const tot = (item.long_usd || 0) + (item.short_usd || 0);
       if (tot > maxUsd) maxUsd = tot;
     }
     if (maxUsd === 0) maxUsd = 500;
-    maxUsd *= 1.18; // 18% headroom for Peak Label
+    const volMaxH = pH * 0.45; // Volume occupies bottom 45%
 
-    // Draw Grid & Y-Axis Scale
-    ctx.strokeStyle = 'hsl(222, 25%, 15%)';
+    // 3. Draw Price Grid & Right Y-Axis Scale
+    ctx.strokeStyle = 'hsl(222, 25%, 14%)';
     ctx.lineWidth = 1;
     ctx.font = '10px "JetBrains Mono", monospace';
-    ctx.fillStyle = '#6b7a8d';
+    ctx.fillStyle = '#8b949e';
     ctx.textAlign = 'left';
 
-    const gridLines = 3;
-    for (let i = 0; i <= gridLines; i++) {
-      const y = this.pad.top + (pH * (1 - i / gridLines));
-      const val = maxUsd * (i / gridLines);
+    const priceGridLines = 3;
+    for (let i = 0; i <= priceGridLines; i++) {
+      const y = this.pad.top + (pH * (1 - i / priceGridLines));
+      const val = pMin + (pRange * (i / priceGridLines));
       ctx.beginPath();
       ctx.moveTo(this.pad.left, y);
       ctx.lineTo(w - this.pad.right, y);
       ctx.stroke();
-      ctx.fillText(`$${this._fmtUsd(val)}`, w - this.pad.right + 4, y + 3);
+      const pDec = val > 10 ? 2 : val > 0.1 ? 4 : 6;
+      ctx.fillText(`$${val.toFixed(pDec)}`, w - this.pad.right + 4, y + 3);
     }
 
-    // Draw Stacked Volume Bars
+    // 4. Draw Stacked Liquidation Volume Bars (Bottom Region)
     const n = series.length;
-    const barW = Math.max(3, Math.min(28, (pW / n) - 3));
+    const barW = Math.max(3, Math.min(26, (pW / n) - 3));
     const step = pW / n;
-    const baseY = this.pad.top + pH;
+    const pricePoints = [];
+    const barCoords = [];
 
     for (let i = 0; i < n; i++) {
       const item = series[i];
       const x = this.pad.left + (i * step) + (step - barW) / 2;
+      const midX = x + barW / 2;
       const longUsd = item.long_usd || 0;
       const shortUsd = item.short_usd || 0;
       const total = longUsd + shortUsd;
 
-      const longH = (longUsd / maxUsd) * pH;
-      const shortH = (shortUsd / maxUsd) * pH;
+      const longH = maxUsd > 0 ? (longUsd / maxUsd) * volMaxH : 0;
+      const shortH = maxUsd > 0 ? (shortUsd / maxUsd) * volMaxH : 0;
       const totalH = longH + shortH;
 
       // Draw Long (Red) on bottom
       if (longH > 0) {
-        ctx.fillStyle = i === this.liqHoverIndex ? '#ff5270' : '#e74c6b';
+        ctx.fillStyle = i === this.liqHoverIndex ? '#ff5270' : 'rgba(231, 76, 107, 0.72)';
         ctx.fillRect(x, baseY - longH, barW, longH);
       }
 
       // Draw Short (Green) stacked above Long
       if (shortH > 0) {
-        ctx.fillStyle = i === this.liqHoverIndex ? '#1ae694' : '#00d27a';
+        ctx.fillStyle = i === this.liqHoverIndex ? '#1ae694' : 'rgba(0, 210, 122, 0.72)';
         ctx.fillRect(x, baseY - totalH, barW, shortH);
       }
 
       // Peak Highlight Glow and Label
       const isPeak = this.peakCluster && (item.time_str === this.peakCluster.time_str) && total > 0;
       if (isPeak) {
-        ctx.fillStyle = 'rgba(246, 173, 85, 0.15)';
+        ctx.fillStyle = 'rgba(246, 173, 85, 0.18)';
         ctx.fillRect(x - 2, baseY - totalH - 12, barW + 4, totalH + 12);
 
         ctx.fillStyle = '#f6ad55';
         ctx.font = 'bold 9px "JetBrains Mono", monospace';
         ctx.textAlign = 'center';
-        ctx.fillText('🔥PEAK', x + barW / 2, Math.max(12, baseY - totalH - 3));
+        ctx.fillText('🔥PEAK', midX, Math.max(12, baseY - totalH - 3));
 
         ctx.strokeStyle = '#f6ad55';
         ctx.lineWidth = 1.8;
         ctx.strokeRect(x - 1, baseY - totalH - 1, barW + 2, totalH + 2);
       }
 
-      // Hover highlight border
-      if (i === this.liqHoverIndex) {
-        ctx.strokeStyle = '#00f2fe';
-        ctx.lineWidth = 1.5;
-        ctx.strokeRect(x - 1, baseY - totalH - 1, barW + 2, totalH + 2);
-      }
+      // Price point coordinates
+      const curP = parseFloat(item.close_price || item.avg_price || item.price || fallbackPrice);
+      const curY = this.pad.top + (pH * (1 - (curP - pMin) / pRange));
+      pricePoints.push({ x: midX, y: curY, p: curP, item: item, i: i });
 
-      this.liqBarCoords.push({
+      barCoords.push({
         x: x,
         y: baseY - totalH,
+        priceY: curY,
         width: barW,
         height: totalH,
         item: item,
@@ -535,8 +553,70 @@ export class ProChart {
       if (i % labelInterval === 0 || i === n - 1) {
         ctx.fillStyle = isPeak ? '#f6ad55' : '#8b949e';
         ctx.textAlign = 'center';
-        ctx.fillText(item.time_str || '', x + barW / 2, h - 6);
+        ctx.font = '10px "JetBrains Mono", monospace';
+        ctx.fillText(item.time_str || '', midX, h - 6);
       }
+    }
+    this.liqBarCoords = barCoords;
+
+    // 5. Draw Price Graph Curve & Area Gradient
+    if (pricePoints.length >= 2) {
+      // Area gradient
+      const pGrad = ctx.createLinearGradient(0, this.pad.top, 0, baseY);
+      pGrad.addColorStop(0, 'rgba(0, 242, 254, 0.20)');
+      pGrad.addColorStop(0.7, 'rgba(0, 242, 254, 0.04)');
+      pGrad.addColorStop(1, 'rgba(0, 242, 254, 0.0)');
+
+      ctx.beginPath();
+      ctx.moveTo(pricePoints[0].x, baseY);
+      for (const pt of pricePoints) {
+        ctx.lineTo(pt.x, pt.y);
+      }
+      ctx.lineTo(pricePoints[pricePoints.length - 1].x, baseY);
+      ctx.closePath();
+      ctx.fillStyle = pGrad;
+      ctx.fill();
+
+      // Smooth / Sharp Price Line
+      ctx.beginPath();
+      ctx.moveTo(pricePoints[0].x, pricePoints[0].y);
+      for (let i = 1; i < pricePoints.length; i++) {
+        ctx.lineTo(pricePoints[i].x, pricePoints[i].y);
+      }
+      ctx.strokeStyle = '#00f2fe';
+      ctx.lineWidth = 2.0;
+      ctx.shadowColor = '#00f2fe';
+      ctx.shadowBlur = 5;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      // Price Dots
+      for (const pt of pricePoints) {
+        ctx.fillStyle = '#00f2fe';
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, pt.i === this.liqHoverIndex ? 4.5 : 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // 6. Crosshair & Hover Overlay
+    if (this.liqHoverIndex >= 0 && this.liqHoverIndex < pricePoints.length) {
+      const hp = pricePoints[this.liqHoverIndex];
+      ctx.save();
+      ctx.setLineDash([3, 3]);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(hp.x, this.pad.top);
+      ctx.lineTo(hp.x, baseY);
+      ctx.stroke();
+      ctx.restore();
+
+      // Glowing cursor dot on price
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(hp.x, hp.y, 4.5, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
 

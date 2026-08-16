@@ -517,6 +517,7 @@ class InMemoryLiquidationManager:
         interval_str = interval_map.get(effective_tf, "5 minutes")
 
         # 3. Time-Rate Distribution Series
+        # 3. Time-Rate Distribution & Price OHLC Series
         time_sql = f"""
             SELECT 
                 strftime(time_bucket(INTERVAL '{interval_str}', exec_time), '%H:%M') as time_str,
@@ -527,7 +528,12 @@ class InMemoryLiquidationManager:
                 COALESCE(sum(CASE WHEN exchange = 'bybit' THEN notional_usd ELSE 0 END), 0.0) as byb_usd,
                 COALESCE(sum(CASE WHEN exchange = 'okx' THEN notional_usd ELSE 0 END), 0.0) as okx_usd,
                 COALESCE(sum(notional_usd), 0.0) as total_usd,
-                count(*) as count
+                count(*) as count,
+                avg(price) as avg_price,
+                min(price) as low_price,
+                max(price) as high_price,
+                arg_min(price, exec_time) as open_price,
+                arg_max(price, exec_time) as close_price
             FROM liquidations {where_sql}
             GROUP BY 1, 2
             ORDER BY timestamp ASC;
