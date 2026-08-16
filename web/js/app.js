@@ -6,10 +6,12 @@ import { ProChart } from './chart.js';
 import { RadarComponent } from './radar.js';
 import { TerminalComponent } from './terminal.js';
 import { OrderflowComponent } from './orderflow.js';
+import { LiquidationsComponent } from './liquidations.js';
 
 class CascadeTradingApp {
   constructor() {
     this.currentSymbol = 'VELVETUSDT';
+    this.currentView = 'trading';
     this.activeSymbolsData = null;
     this.latestPrices = {};
     this.armedSymbols = {};
@@ -24,6 +26,7 @@ class CascadeTradingApp {
     this.radar = new RadarComponent('cascadeList', 'binanceFeedList', 'bybitFeedList');
     this.terminal = new TerminalComponent(this);
     this.orderflow = new OrderflowComponent('alertFeed');
+    this.liquidations = new LiquidationsComponent(this);
 
     this._priceEl = document.getElementById('currentSymPrice');
     this._symNameEl = document.getElementById('currentSymName');
@@ -31,7 +34,41 @@ class CascadeTradingApp {
     this._thCountEl = document.getElementById('thCountBadge');
     this._thListEl = document.getElementById('triggerHistoryList');
 
+    this.setupNavTabs();
     this.init();
+  }
+
+  setupNavTabs() {
+    const tabTrading = document.getElementById('tabTrading');
+    const tabLiqs = document.getElementById('tabLiquidations');
+
+    if (tabTrading) {
+      tabTrading.addEventListener('click', () => this.switchView('trading'));
+    }
+    if (tabLiqs) {
+      tabLiqs.addEventListener('click', () => this.switchView('liquidations'));
+    }
+  }
+
+  switchView(viewName) {
+    this.currentView = viewName;
+    const tabTrading = document.getElementById('tabTrading');
+    const tabLiqs = document.getElementById('tabLiquidations');
+    const viewTrading = document.getElementById('viewTrading');
+    const viewLiqs = document.getElementById('viewLiquidations');
+
+    if (viewName === 'trading') {
+      if (tabTrading) tabTrading.classList.add('active');
+      if (tabLiqs) tabLiqs.classList.remove('active');
+      if (viewTrading) viewTrading.style.display = 'grid';
+      if (viewLiqs) viewLiqs.style.display = 'none';
+    } else {
+      if (tabLiqs) tabLiqs.classList.add('active');
+      if (tabTrading) tabTrading.classList.remove('active');
+      if (viewTrading) viewTrading.style.display = 'none';
+      if (viewLiqs) viewLiqs.style.display = 'flex';
+      this.liquidations.onViewActivated();
+    }
   }
 
   async init() {
@@ -330,6 +367,7 @@ class CascadeTradingApp {
         this.radar.addLiquidation(msg.event);
         this.chart.onLiquidation(msg.event);
         this.orderflow.processLiquidation(msg.event);
+        this.liquidations.onLiveLiquidation(msg.event);
         if (msg.armed) {
           this.armedSymbols[msg.event.symbol] = msg.armed;
           if (msg.event.symbol === this.currentSymbol) {

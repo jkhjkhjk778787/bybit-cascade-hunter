@@ -20,6 +20,17 @@
           ⚡ <span>CASCADE</span> PRO
         </div>
         <span class="tag-version">v6.0 PRO</span>
+
+        <!-- Top Navigation Tabs (메인 트레이딩 탭 / 청산 분석 탭) -->
+        <nav class="nav-tab-container">
+          <button class="nav-tab active" id="tabTrading" data-view="trading">
+            ⚡ 실전 트레이딩
+          </button>
+          <button class="nav-tab" id="tabLiquidations" data-view="liquidations">
+            🌊 청산 분석 & 히스토리
+          </button>
+        </nav>
+
         <div class="connection-badges">
           <div class="conn-pill" id="badgeBackend">
             <span class="conn-dot" id="dotBackend"></span> Server
@@ -58,8 +69,8 @@
       </div>
     </header>
 
-    <!-- 2. MAIN MULTI-PANE WORKSPACE -->
-    <main class="main-workspace">
+    <!-- 2. MAIN TRADING TERMINAL WORKSPACE -->
+    <main class="main-workspace" id="viewTrading">
       
       <!-- LEFT PANE: DUAL EXCHANGE LIQUIDATION & CASCADE RADAR -->
       <aside class="left-pane">
@@ -233,6 +244,151 @@
           </div>
         </section>
       </aside>
+
+    </main>
+
+    <!-- 3. LIQUIDATIONS ANALYTICS & TIMELINE RADAR WORKSPACE -->
+    <main class="main-workspace liquidations-workspace" id="viewLiquidations" style="display: none; flex-direction: column; gap: 10px; padding: 10px; overflow-y: auto;">
+      
+      <!-- TOP: KPI METRICS & EXCHANGE SHARES BANNER -->
+      <section class="liq-dashboard-top">
+        <div class="liq-kpi-card">
+          <span class="kpi-title">💥 24H 총 청산 볼륨</span>
+          <span class="kpi-value highlight-cyan" id="kpiTotalUsd">$0.00</span>
+          <span class="kpi-sub" id="kpiTotalCount">총 0건 기록</span>
+        </div>
+        <div class="liq-kpi-card">
+          <span class="kpi-title">🔴 롱 청산 (Long Liqs)</span>
+          <span class="kpi-value highlight-red" id="kpiLongUsd">$0.00</span>
+          <span class="kpi-sub" id="kpiLongPct">0.0% 비중</span>
+        </div>
+        <div class="liq-kpi-card">
+          <span class="kpi-title">🟢 숏 청산 (Short Liqs)</span>
+          <span class="kpi-value highlight-green" id="kpiShortUsd">$0.00</span>
+          <span class="kpi-sub" id="kpiShortPct">0.0% 비중</span>
+        </div>
+        <div class="liq-kpi-card liq-exchange-share-card">
+          <span class="kpi-title">🏛️ 3대 거래소 청산 점유율</span>
+          <div class="share-bar-container">
+            <div class="share-bar binance" id="shareBarBinance" style="width: 50%;"></div>
+            <div class="share-bar bybit" id="shareBarBybit" style="width: 25%;"></div>
+            <div class="share-bar okx" id="shareBarOkx" style="width: 25%;"></div>
+          </div>
+          <div class="share-legend">
+            <span style="color:var(--binance-yellow);" id="shareLabelBinance">BIN: $0 (0%)</span>
+            <span style="color:var(--bybit-gold);" id="shareLabelBybit">BYB: $0 (0%)</span>
+            <span style="color:var(--okx-blue);" id="shareLabelOkx">OKX: $0 (0%)</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- MIDDLE: SPLIT VIEW (TIMELINE CHART on Left / SYMBOL RANKINGS on Right) -->
+      <section class="liq-middle-grid">
+        
+        <!-- Left: Interactive Timeline Distribution Chart -->
+        <div class="liq-panel liq-timeline-panel">
+          <div class="panel-header liq-panel-header">
+            <div class="liq-header-title">
+              <span>📈 시간대별 청산 볼륨 분포 (Liquidation Timeline)</span>
+              <span class="liq-header-sub" id="timelineIntervalLabel">5분 버킷 주기</span>
+            </div>
+            <!-- Time-rate Buttons -->
+            <div class="timerate-selector" id="timeRateSelector">
+              <button class="btn-timerate" data-tf="1m">1분 (1M)</button>
+              <button class="btn-timerate active" data-tf="5m">5분 (5M)</button>
+              <button class="btn-timerate" data-tf="15m">15분 (15M)</button>
+              <button class="btn-timerate" data-tf="1h">1시간 (1H)</button>
+              <button class="btn-timerate" data-tf="24h">24시간 (24H)</button>
+            </div>
+          </div>
+          <div class="liq-chart-wrapper">
+            <canvas id="liqTimelineCanvas"></canvas>
+            <div id="liqChartTooltip" class="liq-chart-tooltip" style="display:none;"></div>
+          </div>
+        </div>
+
+        <!-- Right: Symbol Liquidation Hotspots & Rankings -->
+        <div class="liq-panel liq-ranking-panel">
+          <div class="panel-header liq-panel-header">
+            <div class="liq-header-title">
+              <span>🔥 심볼별 청산 발생지 랭킹 (Top Hotspots)</span>
+              <span class="liq-header-sub">롱 vs 숏 비율 및 거래소별 분해</span>
+            </div>
+          </div>
+          <div class="liq-table-wrapper" id="symbolRankingsList">
+            <!-- Dynamic Symbol Ranking Rows -->
+          </div>
+        </div>
+      </section>
+
+      <!-- BOTTOM: COMPREHENSIVE LIQUIDATION EXPLORER TABLE WITH FILTERS -->
+      <section class="liq-panel liq-explorer-panel">
+        <div class="panel-header liq-panel-header">
+          <div class="liq-header-title">
+            <span>📋 실시간 & 히스토리 청산 탐색기 (Liquidation Explorer)</span>
+            <span class="liq-header-sub" id="explorerCountLabel">0건 표시</span>
+          </div>
+          <!-- Filter Controls -->
+          <div class="explorer-filters">
+            <!-- Exchange Filter -->
+            <div class="filter-group">
+              <label>거래소:</label>
+              <select id="filterLiqExchange" class="filter-select">
+                <option value="all">전체 (All Exchanges)</option>
+                <option value="binance">🟡 Binance</option>
+                <option value="bybit">🟠 Bybit</option>
+                <option value="okx">🔵 OKX</option>
+              </select>
+            </div>
+            <!-- Side Filter -->
+            <div class="filter-group">
+              <label>청산 방향:</label>
+              <select id="filterLiqSide" class="filter-select">
+                <option value="all">전체 (All Sides)</option>
+                <option value="long">🔴 롱 청산 (Long Liqs)</option>
+                <option value="short">🟢 숏 청산 (Short Liqs)</option>
+              </select>
+            </div>
+            <!-- Min USD Filter -->
+            <div class="filter-group">
+              <label>최소 금액:</label>
+              <select id="filterLiqMinUsd" class="filter-select">
+                <option value="0">전체 ($0+)</option>
+                <option value="500">$500+</option>
+                <option value="1000">$1,000+</option>
+                <option value="5000">$5,000+</option>
+                <option value="10000">$10,000+</option>
+              </select>
+            </div>
+            <!-- Search Symbol Input -->
+            <div class="filter-group">
+              <input type="text" id="filterLiqSymbol" class="filter-input" placeholder="심볼 검색 (예: HEMI, BTC)...">
+            </div>
+            <!-- Refresh Button -->
+            <button id="btnRefreshLiqAnalytics" class="btn-refresh-liq" title="데이터 새로고침">🔄 새로고침</button>
+          </div>
+        </div>
+
+        <div class="liq-table-wrapper explorer-table-container">
+          <table class="liq-explorer-table">
+            <thead>
+              <tr>
+                <th>발생 시각</th>
+                <th>거래소</th>
+                <th>심볼</th>
+                <th>청산 포지션</th>
+                <th>청산 단가</th>
+                <th>청산 수량</th>
+                <th>청산 금액 (USD)</th>
+                <th>액션</th>
+              </tr>
+            </thead>
+            <tbody id="liqExplorerTableBody">
+              <!-- Dynamic Explorer Rows -->
+            </tbody>
+          </table>
+        </div>
+      </section>
 
     </main>
   </div>

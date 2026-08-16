@@ -473,6 +473,7 @@ class CascadeTradingServer:
         self.app.router.add_get("/api/symbols", self.handle_api_symbols)
         self.app.router.add_get("/api/history", self.handle_api_history)
         self.app.router.add_get("/api/trigger_history", self.handle_api_trigger_history)
+        self.app.router.add_get("/api/liquidations/analytics", self.handle_api_liquidation_analytics)
         self.app.router.add_post("/api/order/market", self.handle_api_market_order)
         self.app.router.add_post("/api/order/close_all", self.handle_api_close_all)
         self.app.router.add_post("/api/autotrade/toggle", self.handle_api_toggle_autotrade)
@@ -624,6 +625,160 @@ class CascadeTradingServer:
             all_trigs.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
             triggers = all_trigs[:100]
         return web.json_response({"symbol": symbol, "triggers": triggers})
+
+    def fetch_liquidation_analytics(self, timeframe: str = "5m", exchange: str = "all", symbol: Optional[str] = None) -> Dict[str, Any]:
+        """DuckDB 스냅샷 기반 청산 데이터 분포, 거래소별/심볼별 핫스팟 및 시간대별 통계 조회"""
+        now = time.time()
+        cache_key = f"{timeframe}_{exchange}_{symbol}"
+        cached = getattr(self, "_liq_analytics_cache", {}).get(cache_key)
+        if cached and (now - cached["cached_at"] < 3.0):
+            return cached["data"]
+
+        if not hasattr(self, "_liq_analytics_cache"):
+            self._liq_analytics_cache = OrderedDict()
+
+        interval_map = {
+            "1m": "1 minute",
+            "5m": "5 minutes",
+            "15m": "15 minutes",
+            "1h": "1 hour",
+            "4h": "4 hours",
+            "24h": "1 day"
+        }
+        interval_str = interval_map.get(timeframe, "5 minutes")
+
+        where_clauses = []
+        if exchange and exchange != "all":
+            where_clauses.append(f"exchange = '{exchange}'")
+        if symbol:
+            where_clauses.append(f"symbol = '{symbol.upper()}'")
+        
+        where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+        td = tempfile.mkdtemp()
+        try:
+            snap_db = os.path.join(td, 'snap.duckdb')
+            shutil.copy2(DB_PATH, snap_db)
+            conn = duckdb.connect(snap_db, read_only=True)
+
+            # 1. Summary
+            sum_sql = f"""
+                SELECT 
+                    count(*) as total_count,
+                    COALESCE(sum(notional_usd), 0.0) as total_usd,
+                    COALESCE(sum(CASE WHEN side = 2 THEN notional_usd ELSE 0 END), 0.0) as long_usd,
+                    COALESCE(sum(CASE WHEN side = 1 THEN notional_usd ELSE 0 END), 0.0) as short_usd,
+                    COALESCE(sum(CASE WHEN exchange = 'binance' THEN notional_usd ELSE 0 END), 0.0) as binance_usd,
+                    COALESCE(sum(CASE WHEN exchange = 'bybit' THEN notional_usd ELSE 0 END), 0.0) as bybit_usd,
+                    COALESCE(sum(CASE WHEN exchange = 'okx' THEN notional_usd ELSE 0 END), 0.0) as okx_usd,
+                    count(DISTINCT symbol) as symbol_count
+                FROM liquidations {where_sql};
+            """
+            sum_df = conn.execute(sum_sql).df()
+            summary = sum_df.to_dict(orient='records')[0] if not sum_df.empty else {}
+
+            # 2. Top Symbols Breakdown
+            sym_sql = f"""
+                SELECT 
+                    symbol,
+                    count(*) as count,
+                    COALESCE(sum(notional_usd), 0.0) as total_usd,
+                    COALESCE(sum(CASE WHEN side = 2 THEN notional_usd ELSE 0 END), 0.0) as long_usd,
+                    COALESCE(sum(CASE WHEN side = 1 THEN notional_usd ELSE 0 END), 0.0) as short_usd,
+                    COALESCE(sum(CASE WHEN exchange = 'binance' THEN notional_usd ELSE 0 END), 0.0) as bin_usd,
+                    COALESCE(sum(CASE WHEN exchange = 'bybit' THEN notional_usd ELSE 0 END), 0.0) as byb_usd,
+                    COALESCE(sum(CASE WHEN exchange = 'okx' THEN notional_usd ELSE 0 END), 0.0) as okx_usd
+                FROM liquidations {where_sql}
+                GROUP BY symbol
+                ORDER BY total_usd DESC
+                LIMIT 50;
+            """
+            top_syms = conn.execute(sym_sql).df().to_dict(orient='records')
+
+            # 3. Time-Rate Distribution Series
+            time_sql = f"""
+                SELECT 
+                    strftime(time_bucket(INTERVAL '{interval_str}', exec_time), '%H:%M') as time_str,
+                    epoch(time_bucket(INTERVAL '{interval_str}', exec_time)) * 1000 as timestamp,
+                    COALESCE(sum(CASE WHEN side = 2 THEN notional_usd ELSE 0 END), 0.0) as long_usd,
+                    COALESCE(sum(CASE WHEN side = 1 THEN notional_usd ELSE 0 END), 0.0) as short_usd,
+                    COALESCE(sum(CASE WHEN exchange = 'binance' THEN notional_usd ELSE 0 END), 0.0) as bin_usd,
+                    COALESCE(sum(CASE WHEN exchange = 'bybit' THEN notional_usd ELSE 0 END), 0.0) as byb_usd,
+                    COALESCE(sum(CASE WHEN exchange = 'okx' THEN notional_usd ELSE 0 END), 0.0) as okx_usd,
+                    COALESCE(sum(notional_usd), 0.0) as total_usd,
+                    count(*) as count
+                FROM liquidations {where_sql}
+                GROUP BY 1, 2
+                ORDER BY timestamp ASC;
+            """
+            time_series = conn.execute(time_sql).df().to_dict(orient='records')
+
+            # 4. Recent Records
+            rec_sql = f"""
+                SELECT 
+                    exchange,
+                    symbol,
+                    epoch(exec_time) * 1000 as timestamp,
+                    strftime(exec_time, '%H:%M:%S') as time_str,
+                    CASE WHEN side = 2 THEN 'long' ELSE 'short' END as pos_side,
+                    price,
+                    size,
+                    notional_usd
+                FROM liquidations {where_sql}
+                ORDER BY exec_time DESC
+                LIMIT 200;
+            """
+            recent_records = conn.execute(rec_sql).df().to_dict(orient='records')
+
+            conn.close()
+
+            tot_usd = summary.get("total_usd", 0.0)
+            exchange_shares = {
+                "binance": {
+                    "usd": summary.get("binance_usd", 0.0),
+                    "pct": round((summary.get("binance_usd", 0.0) / tot_usd * 100.0), 1) if tot_usd > 0 else 0.0
+                },
+                "bybit": {
+                    "usd": summary.get("bybit_usd", 0.0),
+                    "pct": round((summary.get("bybit_usd", 0.0) / tot_usd * 100.0), 1) if tot_usd > 0 else 0.0
+                },
+                "okx": {
+                    "usd": summary.get("okx_usd", 0.0),
+                    "pct": round((summary.get("okx_usd", 0.0) / tot_usd * 100.0), 1) if tot_usd > 0 else 0.0
+                }
+            }
+
+            result = {
+                "timeframe": timeframe,
+                "interval_str": interval_str,
+                "exchange": exchange,
+                "symbol": symbol,
+                "summary": summary,
+                "exchange_shares": exchange_shares,
+                "symbol_rankings": top_syms,
+                "time_series": time_series,
+                "recent_records": recent_records,
+                "server_time": time.time()
+            }
+
+            self._liq_analytics_cache[cache_key] = {"cached_at": now, "data": result}
+            while len(self._liq_analytics_cache) > 20:
+                self._liq_analytics_cache.popitem(last=False)
+
+            return result
+        except Exception as e:
+            logger.error(f"청산 분석 쿼리 에러: {e}")
+            return {"error": str(e), "summary": {}, "exchange_shares": {}, "symbol_rankings": [], "time_series": [], "recent_records": []}
+        finally:
+            shutil.rmtree(td, ignore_errors=True)
+
+    async def handle_api_liquidation_analytics(self, request: web.Request) -> web.Response:
+        """3대 거래소 실시간 및 히스토리 청산 데이터 심층 분석 통계 반환"""
+        timeframe = request.query.get("timeframe", "5m")
+        exchange = request.query.get("exchange", "all")
+        symbol = request.query.get("symbol")
+        data = await asyncio.to_thread(self.fetch_liquidation_analytics, timeframe, exchange, symbol)
+        return web.json_response(data)
 
     async def handle_api_market_order(self, request: web.Request) -> web.Response:
         try:
