@@ -46,7 +46,7 @@ export class ProChart {
     this._cvdBinLegendEl = document.getElementById('cvdBinLegend');
     this._cvdBybLegendEl = document.getElementById('cvdBybLegend');
 
-    this.pad = { top: 25, right: 72, bottom: 20, left: 10 };
+    this.pad = { top: 25, right: 78, bottom: 20, left: 10 };
     this._rafPending = false;
     this._dirtyLiq = false;
     this._dirtyTicks = false;
@@ -674,8 +674,8 @@ export class ProChart {
       const p = lo + (i / 4) * (hi - lo);
       const y = yOf(p);
       ctx.beginPath(); ctx.moveTo(this.pad.left, y); ctx.lineTo(w - this.pad.right, y); ctx.stroke();
-      ctx.fillStyle = '#6b7a8d'; ctx.font = '10px "JetBrains Mono",monospace'; ctx.textAlign = 'left';
-      ctx.fillText(this._fmt(p), w - this.pad.right + 4, y + 3);
+      ctx.fillStyle = '#94a3b8'; ctx.font = 'bold 12px "JetBrains Mono",monospace'; ctx.textAlign = 'left';
+      ctx.fillText(this._fmt(p), w - this.pad.right + 6, y + 4);
     }
   }
 
@@ -698,15 +698,15 @@ export class ProChart {
     const side = liq.isLong ? 'LONG' : 'SHORT';
     const usd = liq.usd >= 1000 ? `$${(liq.usd / 1000).toFixed(1)}k` : `$${Math.round(liq.usd)}`;
     const txt = `${liq.exch} ${side} ${usd}`;
-    ctx.font = 'bold 9px "JetBrains Mono",monospace';
-    const tw = ctx.measureText(txt).width + 8;
-    const by = liq.isLong ? y - r - 16 : y + r + 4;
+    ctx.font = 'bold 10px "JetBrains Mono",monospace';
+    const tw = ctx.measureText(txt).width + 10;
+    const by = liq.isLong ? y - r - 18 : y + r + 4;
     ctx.fillStyle = col;
     ctx.beginPath();
-    ctx.roundRect(x - tw / 2, by, tw, 14, 3);
+    ctx.roundRect(x - tw / 2, by, tw, 16, 4);
     ctx.fill();
     ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
-    ctx.fillText(txt, x, by + 10);
+    ctx.fillText(txt, x, by + 12);
   }
 
   _priceLine(ctx, w, y, price) {
@@ -717,9 +717,9 @@ export class ProChart {
     ctx.restore();
     if (price != null) {
       ctx.fillStyle = 'hsl(192,95%,50%)';
-      ctx.fillRect(w - this.pad.right + 1, y - 9, 68, 18);
-      ctx.fillStyle = '#0a0e17'; ctx.font = 'bold 10px "JetBrains Mono",monospace'; ctx.textAlign = 'center';
-      ctx.fillText(this._fmt(price), w - this.pad.right + 35, y + 3);
+      ctx.fillRect(w - this.pad.right + 1, y - 10, 76, 20);
+      ctx.fillStyle = '#0a0e17'; ctx.font = 'bold 11.5px "JetBrains Mono",monospace'; ctx.textAlign = 'center';
+      ctx.fillText(this._fmt(price), w - this.pad.right + 38, y + 4);
     }
   }
 
@@ -768,8 +768,8 @@ export class ProChart {
       const v = minVal + (i / 3) * (maxVal - minVal);
       const y = yOf(v);
       ctx.beginPath(); ctx.moveTo(this.pad.left, y); ctx.lineTo(w - this.pad.right, y); ctx.stroke();
-      ctx.fillStyle = '#6b7a8d'; ctx.font = '10px "JetBrains Mono",monospace'; ctx.textAlign = 'left';
-      ctx.fillText(`$${this._fmtUsd(v)}`, w - this.pad.right + 4, y + 3);
+      ctx.fillStyle = '#94a3b8'; ctx.font = 'bold 12.5px "JetBrains Mono",monospace'; ctx.textAlign = 'left';
+      ctx.fillText(`$${this._fmtUsd(v)}`, w - this.pad.right + 6, y + 4);
     }
 
     const yZero = yOf(0.0);
@@ -786,7 +786,7 @@ export class ProChart {
       ctx.lineTo(xOf(pts[i].t), yOf(pts[i].bin));
     }
     ctx.strokeStyle = 'hsl(45, 100%, 55%)';
-    ctx.lineWidth = 1.8;
+    ctx.lineWidth = 2.2;
     ctx.stroke();
 
     // 2. Draw Bybit CVD (Gold/Orange Line)
@@ -796,7 +796,7 @@ export class ProChart {
       ctx.lineTo(xOf(pts[i].t), yOf(pts[i].byb));
     }
     ctx.strokeStyle = 'hsl(32, 95%, 55%)';
-    ctx.lineWidth = 1.8;
+    ctx.lineWidth = 2.2;
     ctx.stroke();
   }
 
