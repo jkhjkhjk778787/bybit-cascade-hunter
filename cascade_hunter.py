@@ -27,7 +27,7 @@ import urllib.parse
 import hmac
 import hashlib
 from collections import deque
-from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN
+from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN, ROUND_UP
 from typing import Dict, Any, Optional
 
 import websockets

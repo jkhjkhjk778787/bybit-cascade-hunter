@@ -18,7 +18,7 @@ import time
 import urllib.parse
 import urllib.request
 from collections import deque, OrderedDict
-from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
+from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP, ROUND_UP
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Set
 
@@ -112,22 +112,56 @@ class BybitTradingService:
             return {"retCode": -1, "retMsg": str(e)}
 
     def load_symbol_specs(self):
-        url = f"{BYBIT_REST_URL}/v5/market/instruments-info?category=linear"
+        cursor = ""
+        count = 0
         try:
-            with urllib.request.urlopen(url, timeout=5) as response:
-                data = json.loads(response.read().decode('utf-8'))
-                for item in data.get("result", {}).get("list", []):
-                    sym = item.get("symbol")
-                    lsf = item.get("lotSizeFilter", {})
-                    pf = item.get("priceFilter", {})
-                    self.symbol_specs[sym] = {
+            while True:
+                url = f"{BYBIT_REST_URL}/v5/market/instruments-info?category=linear&limit=1000" + (f"&cursor={cursor}" if cursor else "")
+                with urllib.request.urlopen(url, timeout=5) as response:
+                    data = json.loads(response.read().decode('utf-8'))
+                    items = data.get("result", {}).get("list", [])
+                    for item in items:
+                        sym = item.get("symbol")
+                        lsf = item.get("lotSizeFilter", {})
+                        pf = item.get("priceFilter", {})
+                        self.symbol_specs[sym] = {
+                            "min_qty": _safe_float(lsf.get("minOrderQty"), 0.001),
+                            "qty_step": _safe_float(lsf.get("qtyStep"), 0.001),
+                            "min_notional": _safe_float(lsf.get("minNotionalValue"), 5.0),
+                            "tick_size": _safe_float(pf.get("tickSize"), 0.0001),
+                        }
+                        count += 1
+                    cursor = data.get("result", {}).get("nextPageCursor", "")
+                    if not cursor or not items:
+                        break
+            logger.info(f"📐 [Bybit 메타데이터 동기화] 총 {len(self.symbol_specs)}개 전 종목 규격 로드 완료")
+        except Exception as e:
+            logger.error(f"심볼 메타데이터 로드 실패: {e}")
+
+    def get_symbol_spec(self, symbol: str) -> Dict[str, Any]:
+        if symbol in self.symbol_specs:
+            return self.symbol_specs[symbol]
+        # 온디맨드 단일 심볼 조회
+        try:
+            url = f"{BYBIT_REST_URL}/v5/market/instruments-info?category=linear&symbol={symbol}"
+            with urllib.request.urlopen(url, timeout=3) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+                items = data.get("result", {}).get("list", [])
+                if items:
+                    it = items[0]
+                    lsf = it.get("lotSizeFilter", {})
+                    pf = it.get("priceFilter", {})
+                    spec = {
                         "min_qty": _safe_float(lsf.get("minOrderQty"), 0.001),
                         "qty_step": _safe_float(lsf.get("qtyStep"), 0.001),
                         "min_notional": _safe_float(lsf.get("minNotionalValue"), 5.0),
                         "tick_size": _safe_float(pf.get("tickSize"), 0.0001),
                     }
-        except Exception as e:
-            logger.error(f"심볼 메타데이터 로드 실패: {e}")
+                    self.symbol_specs[symbol] = spec
+                    return spec
+        except Exception:
+            pass
+        return {"min_qty": 0.001, "qty_step": 0.001, "min_notional": 5.0, "tick_size": 0.0001}
 
     def get_wallet_balance(self) -> Dict[str, Any]:
         res = self._request("GET", "/v5/account/wallet-balance", {"accountType": "UNIFIED"})
@@ -173,12 +207,7 @@ class BybitTradingService:
             "category": "linear", "symbol": symbol, "buyLeverage": str(leverage), "sellLeverage": str(leverage)
         })
 
-        spec = self.symbol_specs.get(symbol, {
-            "min_qty": 0.001,
-            "qty_step": 0.001,
-            "min_notional": 5.0,
-            "tick_size": 0.0001
-        })
+        spec = self.get_symbol_spec(symbol)
         
         t_res = self._request("GET", "/v5/market/tickers", {"category": "linear", "symbol": symbol})
         last_price = 0.0
