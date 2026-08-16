@@ -53,8 +53,8 @@ class TradeDBManager:
             );
         """)
         self.conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_trades_sym_time 
-            ON trades (symbol, exec_time);
+            CREATE INDEX IF NOT EXISTS idx_trades_time_sym 
+            ON trades (exec_time, symbol);
         """)
 
         # 2. 3대 거래소 실시간 청산 데이터 테이블
@@ -93,10 +93,10 @@ class TradeDBManager:
         if not records:
             return
         try:
-            self.conn.executemany(
-                "INSERT INTO trades VALUES (?, ?, ?, ?, ?, ?)",
-                records
-            )
+            appender = self.conn.appender("trades")
+            for r in records:
+                appender.append_row(r)
+            appender.close()
         except Exception as e:
             log(f"[DB ERROR] 체결 데이터 쓰기 실패: {e}")
 
@@ -104,10 +104,10 @@ class TradeDBManager:
         if not records:
             return
         try:
-            self.conn.executemany(
-                "INSERT INTO liquidations VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                records
-            )
+            appender = self.conn.appender("liquidations")
+            for r in records:
+                appender.append_row(r)
+            appender.close()
         except Exception as e:
             log(f"[DB ERROR] 청산 데이터 쓰기 실패: {e}")
 
@@ -155,7 +155,7 @@ class IntegratedMarketCollector:
                 msg = orjson.dumps({
                     "op": "subscribe",
                     "args": chunk
-                }).decode("utf-8")
+                })
                 try:
                     await self.ws.send(msg)
                     if i + chunk_size < len(topics):
@@ -245,7 +245,10 @@ class IntegratedMarketCollector:
                 while not self.queue.empty() and len(batch) < 10_000:
                     try:
                         record = self.queue.get_nowait()
-                        batch.append(record)
+                        if isinstance(record, list):
+                            batch.extend(record)
+                        else:
+                            batch.append(record)
                         self.queue.task_done()
                     except asyncio.QueueEmpty:
                         break
@@ -264,7 +267,11 @@ class IntegratedMarketCollector:
         final_batch = []
         while not self.queue.empty():
             try:
-                final_batch.append(self.queue.get_nowait())
+                record = self.queue.get_nowait()
+                if isinstance(record, list):
+                    final_batch.extend(record)
+                else:
+                    final_batch.append(record)
                 self.queue.task_done()
             except asyncio.QueueEmpty:
                 break
@@ -340,6 +347,14 @@ class IntegratedMarketCollector:
             if self.liq_stream:
                 await self.liq_stream.stop()
 
+    async def _ping_loop(self, ws):
+        while self.is_running:
+            try:
+                await ws.send(orjson.dumps({"op": "ping"}).decode('utf-8'))
+            except Exception:
+                break
+            await asyncio.sleep(20)
+
     async def ws_receiver(self):
         """Producer: Bybit WebSocket으로부터 체결 틱을 수신하여 큐에 적재"""
         while self.is_running:
@@ -352,53 +367,60 @@ class IntegratedMarketCollector:
                     max_size=2**24
                 ) as ws:
                     self.ws = ws
+                    ping_task = asyncio.create_task(self._ping_loop(ws))
 
-                    if self.subscribed_symbols:
-                        topics = [f"publicTrade.{s}" for s in self.subscribed_symbols]
-                        subscribe_payload = orjson.dumps({
-                            "op": "subscribe",
-                            "args": topics
-                        }).decode("utf-8")
-                        await ws.send(subscribe_payload)
-                        log(f"[WS] 체결 데이터 초기 구독 ({len(self.subscribed_symbols)}개): {', '.join(sorted(self.subscribed_symbols))}")
-
-                    while self.is_running:
-                        try:
-                            raw_msg = await ws.recv()
-                        except (websockets.ConnectionClosed, asyncio.CancelledError):
-                            break
-
-                        data = orjson.loads(raw_msg)
-                        topic = data.get("topic", "")
-                        if topic.startswith("publicTrade."):
-                            trade_list = data.get("data", [])
-                            for t in trade_list:
-                                symbol = t.get("s", topic.replace("publicTrade.", ""))
-                                side_val = 1 if t.get("S") == "Buy" else 2
-                                price = float(t.get("p", 0.0))
-                                size = float(t.get("v", 0.0))
-                                exec_ts = datetime.fromtimestamp(t["T"] / 1000.0)
-
-                                record = (
-                                    symbol,
-                                    t.get("i", ""),
-                                    price,
-                                    size,
-                                    side_val,
-                                    exec_ts
-                                )
-
-                                # 메모리 통계 갱신 (CPU 최적화: 핫 루프에서 strftime 배제)
-                                s_stat = self.symbol_stats[symbol]
-                                s_stat["ticks"] += 1
-                                s_stat["volume"] += size
-                                s_stat["last_price"] = price
-                                s_stat["last_ts"] = t.get("T", 0)
-
-                                try:
-                                    self.queue.put_nowait(record)
-                                except asyncio.QueueFull:
-                                    self.dropped_records += 1
+                    try:
+                        if self.subscribed_symbols:
+                            topics = [f"publicTrade.{s}" for s in self.subscribed_symbols]
+                            subscribe_payload = orjson.dumps({
+                                "op": "subscribe",
+                                "args": topics
+                            })
+                            await ws.send(subscribe_payload)
+                            log(f"[WS] 체결 데이터 초기 구독 ({len(self.subscribed_symbols)}개): {', '.join(sorted(self.subscribed_symbols))}")
+    
+                        while self.is_running:
+                            try:
+                                raw_msg = await ws.recv()
+                            except (websockets.ConnectionClosed, asyncio.CancelledError):
+                                break
+    
+                            data = orjson.loads(raw_msg)
+                            topic = data.get("topic", "")
+                            if topic.startswith("publicTrade."):
+                                trade_list = data.get("data", [])
+                                records_batch = []
+                                for t in trade_list:
+                                    symbol = t.get("s", topic.replace("publicTrade.", ""))
+                                    side_val = 1 if t.get("S") == "Buy" else 2
+                                    price = float(t.get("p", 0.0))
+                                    size = float(t.get("v", 0.0))
+                                    exec_ts = datetime.fromtimestamp(t["T"] / 1000.0)
+    
+                                    record = (
+                                        symbol,
+                                        t.get("i", ""),
+                                        price,
+                                        size,
+                                        side_val,
+                                        exec_ts
+                                    )
+    
+                                    # 메모리 통계 갱신 (CPU 최적화: 핫 루프에서 strftime 배제)
+                                    s_stat = self.symbol_stats[symbol]
+                                    s_stat["ticks"] += 1
+                                    s_stat["volume"] += size
+                                    s_stat["last_price"] = price
+                                    s_stat["last_ts"] = t.get("T", 0)
+                                    records_batch.append(record)
+    
+                                if records_batch:
+                                    try:
+                                        self.queue.put_nowait(records_batch)
+                                    except asyncio.QueueFull:
+                                        self.dropped_records += len(records_batch)
+                    finally:
+                        ping_task.cancel()
 
             except asyncio.CancelledError:
                 break

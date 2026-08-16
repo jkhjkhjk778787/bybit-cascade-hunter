@@ -6,7 +6,6 @@ import { ProChart } from './chart.js';
 import { RadarComponent } from './radar.js';
 import { TerminalComponent } from './terminal.js';
 import { OrderflowComponent } from './orderflow.js';
-import { TunerMatrixComponent } from './tuner_matrix.js';
 
 class CascadeTradingApp {
   constructor() {
@@ -22,6 +21,9 @@ class CascadeTradingApp {
     this.radar = new RadarComponent('cascadeList', 'binanceFeedList', 'bybitFeedList');
     this.terminal = new TerminalComponent(this);
     this.orderflow = new OrderflowComponent('alertFeed');
+
+    this._priceEl = document.getElementById('currentSymPrice');
+    this._symNameEl = document.getElementById('currentSymName');
 
     this.init();
   }
@@ -77,13 +79,14 @@ class CascadeTradingApp {
     this.currentSymbol = sym;
 
     // 1. Header Name & Price
-    document.getElementById('currentSymName').textContent = sym;
-    const priceEl = document.getElementById('currentSymPrice');
+    if (this._symNameEl) this._symNameEl.textContent = sym;
     const knownPrice = this.latestPrices[sym];
-    if (knownPrice) {
-      priceEl.textContent = `$${knownPrice.toFixed(knownPrice > 10 ? 2 : knownPrice > 0.1 ? 4 : 6)}`;
-    } else {
-      priceEl.textContent = '조회 중...';
+    if (this._priceEl) {
+      if (knownPrice) {
+        this._priceEl.textContent = `$${knownPrice.toFixed(knownPrice > 10 ? 2 : knownPrice > 0.1 ? 4 : 6)}`;
+      } else {
+        this._priceEl.textContent = '조회 중...';
+      }
     }
 
     // 2. Switch Chart & Armed Status
@@ -134,8 +137,8 @@ class CascadeTradingApp {
       case 'SNAPSHOT':
         this.updateAccountSummary(msg.balance, msg.positions);
         this.terminal.updatePositions(msg.positions);
-        if (msg.prices) this.latestPrices = { ...this.latestPrices, ...msg.prices };
-        if (msg.armed) this.armedSymbols = { ...this.armedSymbols, ...msg.armed };
+        if (msg.prices) Object.assign(this.latestPrices, msg.prices);
+        if (msg.armed) Object.assign(this.armedSymbols, msg.armed);
         if (msg.recent_liqs) {
           msg.recent_liqs.forEach(l => this.radar.addLiquidation(l));
         }
@@ -160,9 +163,8 @@ class CascadeTradingApp {
       case 'TICKER':
         this.latestPrices[msg.symbol] = msg.price;
         this.chart.onTick(msg);
-        if (msg.symbol === this.currentSymbol) {
-          const priceEl = document.getElementById('currentSymPrice');
-          priceEl.textContent = `$${msg.price.toFixed(msg.price > 10 ? 2 : msg.price > 0.1 ? 4 : 6)}`;
+        if (msg.symbol === this.currentSymbol && this._priceEl) {
+          this._priceEl.textContent = `$${msg.price.toFixed(msg.price > 10 ? 2 : msg.price > 0.1 ? 4 : 6)}`;
         }
         break;
 

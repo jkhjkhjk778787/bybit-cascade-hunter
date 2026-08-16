@@ -6,7 +6,7 @@ export class TunerMatrixComponent {
   constructor(tableBodyId, app) {
     this.tableBodyEl = document.getElementById(tableBodyId);
     this.app = app;
-    this.symbolsData = new Map();
+    this._selectedRow = null;
   }
 
   async fetchSymbols() {
@@ -22,6 +22,9 @@ export class TunerMatrixComponent {
   renderTable(symbolsList) {
     if (!this.tableBodyEl) return;
     this.tableBodyEl.innerHTML = '';
+    this._selectedRow = null;
+
+    const frag = document.createDocumentFragment();
 
     symbolsList.forEach(s => {
       const sym = s.symbol;
@@ -29,6 +32,7 @@ export class TunerMatrixComponent {
       row.dataset.symbol = sym;
       if (sym === this.app.currentSymbol) {
         row.classList.add('selected');
+        this._selectedRow = row;
       }
 
       // Check if active in tuner
@@ -52,12 +56,17 @@ export class TunerMatrixComponent {
       `;
 
       row.addEventListener('click', () => {
-        document.querySelectorAll('#symbolTableBody tr').forEach(r => r.classList.remove('selected'));
+        if (this._selectedRow) {
+          this._selectedRow.classList.remove('selected');
+        }
         row.classList.add('selected');
+        this._selectedRow = row;
         this.app.selectSymbol(sym);
       });
 
-      this.tableBodyEl.appendChild(row);
+      frag.appendChild(row);
     });
+
+    this.tableBodyEl.appendChild(frag);
   }
 }

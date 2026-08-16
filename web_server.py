@@ -17,7 +17,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
-from collections import deque
+from collections import deque, OrderedDict
 from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Set
@@ -269,13 +269,65 @@ class CascadeTradingServer:
         self.is_running = True
         self.auto_trade_enabled = False
 
+        self._http_session: Optional[ClientSession] = None
+        self._chart_cache = OrderedDict()
+        self._active_symbols_cache = {}
+        self._active_symbols_mtime = 0
+        self._last_ticker_broadcast: Dict[str, float] = {}
         self.latest_prices: Dict[str, float] = {}
-        self.price_history_5m: Dict[str, deque] = {}
         self.armed_status: Dict[str, Dict[str, Any]] = {}
-        self.absorption_alerts: deque = deque(maxlen=50)
-        self.recent_liquidations: deque = deque(maxlen=100)
+        self.recent_liquidations_by_sym: Dict[str, deque] = {}
+
+        self.ticker_ws = None
+        # 초기 기본 20개 동시 상장 심볼
+        self.top20_symbols: List[str] = [
+            "BTCUSDT", "ETHUSDT", "SOLUSDT", "COWUSDT", "CYSUSDT",
+            "ACEUSDT", "AKEUSDT", "HYPEUSDT", "HEMIUSDT", "XRPUSDT",
+            "BEATUSDT", "HUSDT", "LINKUSDT", "VELVETUSDT", "APRUSDT",
+            "DOGEUSDT", "ZECUSDT", "ADAUSDT", "WALUSDT", "WLDUSDT"
+        ]
+        self.subscribed_ticker_symbols: Set[str] = set(self.top20_symbols)
 
         self.setup_routes()
+
+    async def update_top_20_subscriptions(self, new_top20: List[str]):
+        """상위 20개 심볼 유지: 탈락 심볼 구독 해제, 진입 심볼 신규 구독"""
+        old_set = set(self.top20_symbols)
+        new_set = set(new_top20)
+
+        dropped = old_set - new_set
+        added = new_set - old_set
+
+        self.top20_symbols = list(new_top20)
+        self.subscribed_ticker_symbols = set(new_top20)
+
+        if self.ticker_ws and not self.ticker_ws.closed:
+            if dropped:
+                try:
+                    drop_topics = [f"tickers.{s}" for s in dropped]
+                    await self.ticker_ws.send_str(orjson.dumps({"op": "unsubscribe", "args": drop_topics}).decode('utf-8'))
+                    logger.info(f"🛑 [Bybit Ticker Stream] TOP 20 제외 심볼 구독 해제: {', '.join(dropped)}")
+                except Exception as e:
+                    logger.error(f"티커 구독 해제 실패: {e}")
+            if added:
+                try:
+                    add_topics = [f"tickers.{s}" for s in added]
+                    await self.ticker_ws.send_str(orjson.dumps({"op": "subscribe", "args": add_topics}).decode('utf-8'))
+                    logger.info(f"✨ [Bybit Ticker Stream] TOP 20 신규 진입 심볼 구독 등록: {', '.join(added)}")
+                except Exception as e:
+                    logger.error(f"티커 신규 구독 실패: {e}")
+
+    async def subscribe_ticker_symbol(self, symbol: str):
+        """특정 심볼 조회 시 임시 티커 스트림 활성화"""
+        if not symbol or symbol in self.subscribed_ticker_symbols:
+            return
+        self.subscribed_ticker_symbols.add(symbol)
+        if self.ticker_ws and not self.ticker_ws.closed:
+            try:
+                await self.ticker_ws.send_str(orjson.dumps({"op": "subscribe", "args": [f"tickers.{symbol}"]}).decode('utf-8'))
+                logger.info(f"📡 [Bybit Ticker Stream] 심볼 실시간 구독 추가: tickers.{symbol}")
+            except Exception as e:
+                logger.error(f"티커 동적 구독 실패: {e}")
 
     def setup_routes(self):
         self.app.router.add_get("/", self.handle_index)
@@ -297,13 +349,15 @@ class CascadeTradingServer:
         return web.Response(text="Trading Suite Web UI is loading...", content_type="text/html")
 
     async def handle_api_status(self, request: web.Request) -> web.Response:
-        active_symbols_data = {}
-        if os.path.exists(ACTIVE_SYMBOLS_PATH):
-            try:
+        try:
+            mt = os.path.getmtime(ACTIVE_SYMBOLS_PATH)
+            if mt != self._active_symbols_mtime:
                 with open(ACTIVE_SYMBOLS_PATH, "r") as f:
-                    active_symbols_data = json.load(f)
-            except Exception:
-                pass
+                    self._active_symbols_cache = orjson.loads(f.read())
+                self._active_symbols_mtime = mt
+        except Exception:
+            pass
+        active_symbols_data = self._active_symbols_cache
 
         now = time.time()
         active_armed = {k: v for k, v in self.armed_status.items() if now <= v.get("expires", 0)}
@@ -319,8 +373,8 @@ class CascadeTradingServer:
         })
 
     async def handle_api_account(self, request: web.Request) -> web.Response:
-        balance = self.trader.get_wallet_balance()
-        positions = self.trader.get_positions()
+        balance = await asyncio.to_thread(self.trader.get_wallet_balance)
+        positions = await asyncio.to_thread(self.trader.get_positions)
         return web.json_response({
             "balance": balance,
             "positions": positions
@@ -336,54 +390,55 @@ class CascadeTradingServer:
         candles = []
         trades = []
         try:
-            async with ClientSession() as session:
-                kline_url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}&interval=1&limit=60"
-                trade_url = f"https://api.bybit.com/v5/market/recent-trade?category=linear&symbol={symbol}&limit=100"
+            kline_url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}&interval=1&limit=60"
+            trade_url = f"https://api.bybit.com/v5/market/recent-trade?category=linear&symbol={symbol}&limit=100"
 
-                async with session.get(kline_url, timeout=2.5) as r1, session.get(trade_url, timeout=2.5) as r2:
-                    kdata = await r1.json()
-                    tdata = await r2.json()
+            async with self._http_session.get(kline_url, timeout=2.5) as r1, self._http_session.get(trade_url, timeout=2.5) as r2:
+                kdata = await r1.json()
+                tdata = await r2.json()
 
-                    for item in kdata.get("result", {}).get("list", []):
-                        candles.append({
-                            "t": int(item[0]),
-                            "o": float(item[1]),
-                            "h": float(item[2]),
-                            "l": float(item[3]),
-                            "c": float(item[4]),
-                            "v": float(item[5])
-                        })
-                    candles.reverse()
+                for item in kdata.get("result", {}).get("list", []):
+                    candles.append({
+                        "t": int(item[0]),
+                        "o": float(item[1]),
+                        "h": float(item[2]),
+                        "l": float(item[3]),
+                        "c": float(item[4]),
+                        "v": float(item[5])
+                    })
+                candles.reverse()
 
-                    for tr in tdata.get("result", {}).get("list", []):
-                        trades.append({
-                            "t": int(tr.get("time", 0)),
-                            "p": float(tr.get("price", 0)),
-                            "s": tr.get("side", "Buy"),
-                            "v": float(tr.get("size", 1))
-                        })
-                    trades.reverse()
+                for tr in tdata.get("result", {}).get("list", []):
+                    trades.append({
+                        "t": int(tr.get("time", 0)),
+                        "p": float(tr.get("price", 0)),
+                        "s": tr.get("side", "Buy"),
+                        "v": float(tr.get("size", 1))
+                    })
+                trades.reverse()
 
         except Exception as e:
             logger.error(f"차트 데이터 조회 에러: {e}")
 
         result = {"candles": candles, "trades": trades}
-        if not hasattr(self, "_chart_cache"):
-            self._chart_cache = {}
         self._chart_cache[symbol] = {"cached_at": now, "data": result}
+        self._chart_cache.move_to_end(symbol)
+        while len(self._chart_cache) > 20:
+            self._chart_cache.popitem(last=False)
         return result
 
     async def handle_api_symbols(self, request: web.Request) -> web.Response:
-        """탑 심볼 목록 초고속 반환"""
-        return web.json_response({"symbols": list(self.latest_prices.keys())})
+        """현재 활성 20개 동시 상장 심볼 목록 반환"""
+        return web.json_response({"symbols": self.top20_symbols})
 
     async def handle_api_history(self, request: web.Request) -> web.Response:
         """0ms 초고속 차트 데이터 및 청산 내역 반환"""
         symbol = request.query.get("symbol", "VELVETUSDT").upper()
+        asyncio.create_task(self.subscribe_ticker_symbol(symbol))
         chart_data = await self.fetch_bybit_chart_data(symbol)
 
         # In-memory recent liquidations for this symbol
-        mem_liqs = [l for l in self.recent_liquidations if l.get("symbol") == symbol]
+        mem_liqs = list(self.recent_liquidations_by_sym.get(symbol, []))
         liq_data = []
         for ml in mem_liqs:
             ts = ml.get("timestamp", int(time.time() * 1000))
@@ -418,20 +473,21 @@ class CascadeTradingServer:
             tp_pct = float(body.get("tp_pct", 2.0))
             sl_pct = float(body.get("sl_pct", 0.6))
 
-            result = self.trader.place_market_order(
-                symbol=symbol,
-                side=side,
-                order_value_usdt=order_usd,
-                leverage=leverage,
-                tp_pct=tp_pct,
-                sl_pct=sl_pct
+            result = await asyncio.to_thread(
+                self.trader.place_market_order,
+                symbol,
+                side,
+                order_usd,
+                leverage,
+                tp_pct,
+                sl_pct
             )
             return web.json_response({"success": result.get("retCode") == 0, "response": result})
         except Exception as e:
             return web.json_response({"success": False, "error": str(e)}, status=400)
 
     async def handle_api_close_all(self, request: web.Request) -> web.Response:
-        res = self.trader.close_all_positions()
+        res = await asyncio.to_thread(self.trader.close_all_positions)
         return web.json_response({"success": True, "results": res})
 
     async def handle_api_toggle_autotrade(self, request: web.Request) -> web.Response:
@@ -446,15 +502,15 @@ class CascadeTradingServer:
         logger.info(f"🌐 [Web UI 접속] 클라이언트 연결됨 (총 {len(self.ws_clients)}명)")
 
         try:
-            balance = self.trader.get_wallet_balance()
-            positions = self.trader.get_positions()
+            balance = await asyncio.to_thread(self.trader.get_wallet_balance)
+            positions = await asyncio.to_thread(self.trader.get_positions)
             await ws.send_str(orjson.dumps({
                 "type": "SNAPSHOT",
                 "balance": balance,
                 "positions": positions,
                 "prices": self.latest_prices,
                 "armed": self.armed_status,
-                "recent_liqs": list(self.recent_liquidations)[-30:],
+                "recent_liqs": sorted([x for dq in self.recent_liquidations_by_sym.values() for x in dq], key=lambda x: x.get('timestamp', 0))[-30:],
                 "auto_trade": self.auto_trade_enabled
             }).decode('utf-8'))
         except Exception:
@@ -479,31 +535,40 @@ class CascadeTradingServer:
         if not self.ws_clients:
             return
         msg_str = orjson.dumps(payload).decode('utf-8')
+        results = await asyncio.gather(
+            *[ws.send_str(msg_str) for ws in self.ws_clients],
+            return_exceptions=True
+        )
         dead_clients = set()
-        for ws in self.ws_clients:
-            try:
-                await ws.send_str(msg_str)
-            except Exception:
+        for ws, r in zip(list(self.ws_clients), results):
+            if isinstance(r, Exception):
                 dead_clients.add(ws)
         for d in dead_clients:
             self.ws_clients.discard(d)
 
     async def run_liquidation_stream(self):
-        """사용자님의 crypto-liquidation-stream을 통한 실시간 멀티 거래소 청산 브로드캐스트 & 연쇄 감지"""
+        """바이낸스 & 바이비트 2대 거래소 실시간 청산 스트림 (TOP 20 심볼 타겟 필터링)"""
         binance_recent_liqs: Dict[str, Dict[str, Any]] = {}
 
         while self.is_running:
             try:
-                async with LiquidationStream(exchanges=["binance", "bybit", "okx"], min_notional_usd=0.0) as stream:
-                    logger.info("⚡ [crypto_liquidation] 3대 거래소 실시간 청산 스트림 & 연쇄 감지기 가동!")
+                # 바이낸스 + 바이비트 2개 거래소 청산 감시 ($50 이상)
+                async with LiquidationStream(exchanges=["binance", "bybit"], min_notional_usd=50.0) as stream:
+                    logger.info("⚡ [crypto_liquidation] 바이낸스 & 바이비트 청산 스트림 가동 (TOP 20 전용)!")
                     async for event in stream:
                         if not self.is_running: break
 
+                        sym = event.symbol
+                        # 20개 선정 심볼만 엄격 필터링
+                        if self.top20_symbols and sym not in self.top20_symbols:
+                            continue
+
                         now = time.time()
                         event_dict = event.to_dict()
-                        self.recent_liquidations.append(event_dict)
+                        if sym not in self.recent_liquidations_by_sym:
+                            self.recent_liquidations_by_sym[sym] = deque(maxlen=50)
+                        self.recent_liquidations_by_sym[sym].append(event_dict)
 
-                        sym = event.symbol
                         is_cascade = False
                         cascade_data = None
 
@@ -516,6 +581,8 @@ class CascadeTradingServer:
                             }
 
                             if event.notional_usd >= 200.0:
+                                if len(self.armed_status) > 100:
+                                    self.armed_status = {k: v for k, v in self.armed_status.items() if now <= v.get('expires', 0)}
                                 target_side = "Sell" if event.is_long_liquidation else "Buy"
                                 self.armed_status[sym] = {
                                     "target_side": target_side,
@@ -548,6 +615,9 @@ class CascadeTradingServer:
                                     "cascade": cascade_data
                                 })
 
+                        if len(binance_recent_liqs) > 200:
+                            binance_recent_liqs = {k: v for k, v in binance_recent_liqs.items() if now - v['ts'] <= 10.0}
+
                         event_dict["is_cascade"] = is_cascade
                         await self.broadcast({
                             "type": "LIQUIDATION",
@@ -565,13 +635,15 @@ class CascadeTradingServer:
             try:
                 async with ClientSession() as session:
                     async with session.ws_connect(BYBIT_WS_URL) as ws:
-                        topics = ["tickers.VELVETUSDT", "tickers.BTCUSDT", "tickers.ETHUSDT", "tickers.ACEUSDT",
-                                  "tickers.AKEUSDT", "tickers.APRUSDT", "tickers.BEATUSDT", "tickers.BTWUSDT",
-                                  "tickers.COWUSDT", "tickers.CYSUSDT", "tickers.HEMIUSDT", "tickers.TUTUSDT",
-                                  "tickers.SPORTFUNUSDT", "tickers.HYPEUSDT", "tickers.BICOUSDT", "tickers.WALUSDT"]
-                        
-                        await ws.send_str(json.dumps({"op": "subscribe", "args": topics}))
-                        logger.info(f"📡 [Bybit Ticker Stream] {len(topics)}개 심볼 가격 스트림 연결 성공!")
+                        self.ticker_ws = ws
+                        sym_list = list(self.subscribed_ticker_symbols)
+                        chunk_size = 10
+                        for i in range(0, len(sym_list), chunk_size):
+                            chunk = [f"tickers.{s}" for s in sym_list[i:i + chunk_size]]
+                            await ws.send_str(orjson.dumps({"op": "subscribe", "args": chunk}).decode('utf-8'))
+                            if i + chunk_size < len(sym_list):
+                                await asyncio.sleep(0.05)
+                        logger.info(f"📡 [Bybit Ticker Stream] {len(sym_list)}개 심볼 가격 스트림 연결 성공!")
 
                         async for msg in ws:
                             if not self.is_running: break
@@ -586,9 +658,9 @@ class CascadeTradingServer:
                                         p_float = float(lp)
                                         self.latest_prices[sym] = p_float
                                         now = time.time()
-                                        if sym not in self.price_history_5m:
-                                            self.price_history_5m[sym] = deque(maxlen=600)
-                                        self.price_history_5m[sym].append((now, p_float))
+                                        if now - self._last_ticker_broadcast.get(sym, 0) < 0.1:
+                                            continue
+                                        self._last_ticker_broadcast[sym] = now
 
                                         await self.broadcast({
                                             "type": "TICKER",
@@ -600,13 +672,58 @@ class CascadeTradingServer:
                 logger.error(f"Bybit Ticker 에러: {e} ➔ 3초 후 재연결...")
                 await asyncio.sleep(3)
 
+    async def run_top_symbol_scanner(self):
+        """바이낸스 & 바이비트 선물 동시 상장 심볼 중 거래대금 TOP 20종 15분 주기 자동 갱신 및 구독 유지"""
+        while self.is_running:
+            try:
+                # 1. Binance USDT-M 선물 상장 심볼 조회
+                bin_syms = set()
+                try:
+                    async with self._http_session.get("https://fapi.binance.com/fapi/v1/exchangeInfo", timeout=5) as r_bin:
+                        bdata = await r_bin.json()
+                        bin_syms = {
+                            s['symbol'] for s in bdata.get('symbols', [])
+                            if s.get('contractType') == 'PERPETUAL' and s.get('quoteAsset') == 'USDT' and s.get('status') == 'TRADING'
+                        }
+                except Exception as e:
+                    logger.warning(f"Binance exchangeInfo 조회 오류: {e}")
+
+                # 2. Bybit 선물 티커 조회
+                async with self._http_session.get(f"{BYBIT_REST_URL}/v5/market/tickers?category=linear", timeout=5) as r_bybit:
+                    bydata = await r_bybit.json()
+                    by_list = bydata.get("result", {}).get("list", [])
+
+                dual_candidates = []
+                for item in by_list:
+                    sym = item.get("symbol", "")
+                    if not sym.endswith("USDT") or "USDC" in sym:
+                        continue
+                    if bin_syms and sym not in bin_syms:
+                        continue
+                    turnover24h = float(item.get("turnover24h", 0.0))
+                    dual_candidates.append((sym, turnover24h))
+
+                # 거래대금 상위 정렬 ➔ 정확히 20개 심볼 선정
+                dual_candidates.sort(key=lambda x: x[1], reverse=True)
+                top_symbols = [s[0] for s in dual_candidates[:20]]
+
+                if len(top_symbols) >= 10:
+                    await self.update_top_20_subscriptions(top_symbols)
+                    logger.info(f"🔄 [15M TOP 20 갱신 완료] 동시 상장 20종: {', '.join(top_symbols)}")
+
+            except Exception as e:
+                logger.error(f"동시상장 TOP 20 스캐너 에러: {e}")
+
+            # 15분(900초) 주기 갱신
+            await asyncio.sleep(900.0)
+
     async def run_account_sync_loop(self):
         """계좌 잔고 및 포지션 2초 주기 실시간 동기화"""
         while self.is_running:
             try:
                 if self.ws_clients:
-                    balance = self.trader.get_wallet_balance()
-                    positions = self.trader.get_positions()
+                    balance = await asyncio.to_thread(self.trader.get_wallet_balance)
+                    positions = await asyncio.to_thread(self.trader.get_positions)
                     await self.broadcast({
                         "type": "ACCOUNT_UPDATE",
                         "balance": balance,
@@ -616,7 +733,18 @@ class CascadeTradingServer:
                 logger.error(f"계좌 동기화 에러: {e}")
             await asyncio.sleep(2.0)
 
+    async def _warmup_connections(self):
+        try:
+            async with self._http_session.get('https://api.bybit.com/v5/market/kline?category=linear&symbol=BTCUSDT&interval=1&limit=1', timeout=3) as r:
+                await r.read()
+            logger.info('🔥 HTTP 커넥션 풀 워밍업 완료')
+        except Exception:
+            pass
+
     async def start(self):
+        self._http_session = ClientSession()
+        await self._warmup_connections()
+
         runner = web.AppRunner(self.app)
         await runner.setup()
         site = web.TCPSite(runner, "0.0.0.0", self.port)
@@ -626,6 +754,7 @@ class CascadeTradingServer:
         await asyncio.gather(
             self.run_liquidation_stream(),
             self.run_ticker_stream(),
+            self.run_top_symbol_scanner(),
             self.run_account_sync_loop()
         )
 
@@ -641,6 +770,8 @@ def main():
         asyncio.run(server.start())
     except KeyboardInterrupt:
         server.is_running = False
+        if getattr(server, '_http_session', None):
+            asyncio.run(server._http_session.close())
         sys.exit(0)
 
 

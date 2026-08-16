@@ -1,51 +1,22 @@
 {
-  "updated_at": "2026-08-16 14:07:50",
-  "total_active_count": 3,
+  "updated_at": "2026-08-16 18:43:01",
+  "total_active_count": 1,
   "symbols": {
-    "ACEUSDT": {
-      "bin_arm_usd": 500.0,
-      "arm_sec": 8.0,
-      "bybit_confirm_usd": 50.0,
-      "bybit_confirm_drop": 0.12,
-      "trailing_bounce": 0.2,
-      "min_gain_pct": 1.0,
-      "tp_pct": 2.5,
-      "sl_pct": 0.6,
-      "timeout_sec": 45.0,
-      "trades": 9,
-      "win_rate": 77.8,
-      "total_pnl_pct": 50.71,
-      "profit_factor": 3.97
-    },
-    "HEMIUSDT": {
-      "bin_arm_usd": 300.0,
-      "arm_sec": 8.0,
-      "bybit_confirm_usd": 50.0,
-      "bybit_confirm_drop": 0.08,
-      "trailing_bounce": 0.25,
-      "min_gain_pct": 1.0,
-      "tp_pct": 2.5,
-      "sl_pct": 0.6,
-      "timeout_sec": 45.0,
-      "trades": 10,
-      "win_rate": 80.0,
-      "total_pnl_pct": 47.23,
-      "profit_factor": 3.21
-    },
-    "TUTUSDT": {
+    "VELVETUSDT": {
       "bin_arm_usd": 200.0,
       "arm_sec": 8.0,
       "bybit_confirm_usd": 50.0,
-      "bybit_confirm_drop": 0.12,
+      "bybit_confirm_drop": 0.08,
       "trailing_bounce": 0.15,
       "min_gain_pct": 1.0,
       "tp_pct": 2.5,
       "sl_pct": 0.6,
       "timeout_sec": 45.0,
-      "trades": 5,
-      "win_rate": 80.0,
-      "total_pnl_pct": 8.36,
-      "profit_factor": 2.41
+      "trades": 7,
+      "win_rate": 71.4,
+      "total_pnl_pct": 45.83000183105469,
+      "profit_factor": 2.490000009536743,
+      "status": "retained"
     }
   }
 }

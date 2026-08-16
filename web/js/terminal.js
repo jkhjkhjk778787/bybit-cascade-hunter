@@ -11,6 +11,7 @@ export class TerminalComponent {
     this.leverage = 15;
     this.tpPct = 2.0;
     this.slPct = 0.6;
+    this.positionsListEl = document.getElementById('positionsList');
 
     this.bindEvents();
   }
@@ -68,6 +69,22 @@ export class TerminalComponent {
 
     // Emergency Close All
     document.getElementById('btnEmergencyClose').addEventListener('click', () => this.closeAllPositions());
+
+    // Position Cards Delegation
+    if (this.positionsListEl) {
+      this.positionsListEl.addEventListener('click', async (e) => {
+        const btn = e.target.closest('.btn-close-pos');
+        if (btn) {
+          e.stopPropagation();
+          await fetch('/api/order/close_all', { method: 'POST' });
+          return;
+        }
+        const card = e.target.closest('.position-card');
+        if (card && card.dataset.symbol && window.app) {
+          window.app.selectSymbol(card.dataset.symbol);
+        }
+      });
+    }
   }
 
   setSymbol(sym) {
@@ -122,7 +139,7 @@ export class TerminalComponent {
   }
 
   updatePositions(positions) {
-    const listEl = document.getElementById('positionsList');
+    const listEl = this.positionsListEl;
     if (!listEl) return;
     listEl.innerHTML = '';
 
@@ -131,6 +148,7 @@ export class TerminalComponent {
       return;
     }
 
+    const frag = document.createDocumentFragment();
     positions.forEach(p => {
       const isLong = p.side === 'Buy';
       const pnl = p.unrealisedPnl;
@@ -139,6 +157,7 @@ export class TerminalComponent {
       const card = document.createElement('div');
       card.className = 'position-card';
       card.style.cursor = 'pointer';
+      card.dataset.symbol = p.symbol;
       card.title = `${p.symbol} 차트 및 주문 터미널로 즉시 전환`;
       card.innerHTML = `
         <div class="pos-header">
@@ -158,19 +177,9 @@ export class TerminalComponent {
         <button class="btn-close-pos" data-sym="${p.symbol}">시장가 종료</button>
       `;
 
-      card.addEventListener('click', (e) => {
-        if (e.target.tagName !== 'BUTTON' && window.app) {
-          window.app.selectSymbol(p.symbol);
-        }
-      });
-
-      card.querySelector('.btn-close-pos').addEventListener('click', async (e) => {
-        e.stopPropagation();
-        await fetch('/api/order/close_all', { method: 'POST' });
-      });
-
-      listEl.appendChild(card);
+      frag.appendChild(card);
     });
+    listEl.appendChild(frag);
   }
 
   showToast(msg, type = 'info') {

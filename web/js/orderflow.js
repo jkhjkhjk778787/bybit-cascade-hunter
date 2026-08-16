@@ -6,24 +6,31 @@ export class OrderflowComponent {
   constructor(alertFeedId) {
     this.alertFeedEl = document.getElementById(alertFeedId);
     this.symbolDeltas = new Map(); // symbol -> {buyVol, sellVol, lastPrice, minPrice, maxPrice}
+    this._alertTimers = new Map();
   }
 
   processLiquidation(event) {
+    if (!this.alertFeedEl) return;
+
     const sym = event.symbol;
     const isLong = event.pos_side === 'long' || event.side === 'sell';
     const usd = event.notional_usd || (event.price * event.amount);
 
     if (usd >= 1000) {
+      if (this._alertTimers.has(sym)) {
+        clearTimeout(this._alertTimers.get(sym));
+      }
       // Large liquidation event detected
       // Check if price bounced immediately (absorption sign)
-      setTimeout(() => {
+      this._alertTimers.set(sym, setTimeout(() => {
+        this._alertTimers.delete(sym);
         this.addAlert({
           symbol: sym,
           type: 'absorption',
           title: `🐋 대규모 ${isLong ? '롱' : '숏'} 청산 ($${Math.round(usd).toLocaleString()})`,
           detail: `세력 방어벽 / 흡수 발생 가능성 주시 (휩쏘 경계)`
         });
-      }, 500);
+      }, 500));
     }
   }
 

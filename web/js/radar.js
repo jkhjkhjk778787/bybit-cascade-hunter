@@ -10,11 +10,28 @@ export class RadarComponent {
     this.bybitFeedEl = document.getElementById(bybitFeedId);
 
     this.cascadeCards = new Map(); // symbol -> DOMElement
-    this.initTimerLoop();
+    this._timerRunning = false;
+
+    // Event delegation for liquidation feeds
+    const handleFeedClick = e => {
+      const row = e.target.closest('.liq-row');
+      if (row && row.dataset.symbol && window.app) {
+        window.app.selectSymbol(row.dataset.symbol);
+      }
+    };
+    if (this.binanceFeedEl) this.binanceFeedEl.addEventListener('click', handleFeedClick);
+    if (this.bybitFeedEl) this.bybitFeedEl.addEventListener('click', handleFeedClick);
   }
 
-  initTimerLoop() {
-    setInterval(() => {
+  _startTimerIfNeeded() {
+    if (this._timerRunning || this.cascadeCards.size === 0) return;
+    this._timerRunning = true;
+    this._timerInterval = setInterval(() => {
+      if (this.cascadeCards.size === 0) {
+        clearInterval(this._timerInterval);
+        this._timerRunning = false;
+        return;
+      }
       const now = Date.now() / 1000;
       for (const [sym, card] of this.cascadeCards.entries()) {
         const expires = parseFloat(card.dataset.expires);
@@ -29,8 +46,8 @@ export class RadarComponent {
             placeholder.style.display = 'block';
           }
         } else {
-          const fill = card.querySelector('.progress-bar-fill');
-          const timeText = card.querySelector('.cascade-time');
+          const fill = card._fillEl;
+          const timeText = card._timeTextEl;
           const pct = (remaining / duration) * 100;
           if (fill) fill.style.width = `${pct}%`;
           if (timeText) timeText.textContent = `${remaining.toFixed(1)}s`;
@@ -105,7 +122,10 @@ export class RadarComponent {
       });
 
       this.cascadeListEl.prepend(card);
+      card._fillEl = card.querySelector('.progress-bar-fill');
+      card._timeTextEl = card.querySelector('.cascade-time');
       this.cascadeCards.set(sym, card);
+      this._startTimerIfNeeded();
     }
 
     card.dataset.expires = expires;
@@ -130,6 +150,7 @@ export class RadarComponent {
     row.className = `liq-row ${rowClass} ${isCascade ? 'cascade-linked' : ''}`;
     row.style.cursor = 'pointer';
     row.title = `${event.symbol} (${exch.toUpperCase()}) 차트 및 주문 터미널로 즉시 전환`;
+    row.dataset.symbol = event.symbol;
     row.innerHTML = `
       <div class="feed-row-top">
         <span style="font-weight:800; color:var(--text-primary); font-size:12px;">${event.symbol}</span>
@@ -142,10 +163,6 @@ export class RadarComponent {
         <span style="color:var(--text-muted); font-size:10px;">${timeStr}</span>
       </div>
     `;
-
-    row.addEventListener('click', () => {
-      if (window.app) window.app.selectSymbol(event.symbol);
-    });
 
     targetFeed.prepend(row);
 

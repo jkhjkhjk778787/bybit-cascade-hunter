@@ -75,7 +75,7 @@ class DiscordNotifier:
         try:
             req = urllib.request.Request(
                 self.webhook_url,
-                data=json.dumps(payload).encode('utf-8'),
+                data=orjson.dumps(payload),
                 headers={'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0'}
             )
             with urllib.request.urlopen(req, timeout=3) as resp:
@@ -91,7 +91,7 @@ class DiscordNotifier:
 class BybitV5Client:
     def __init__(self, cred_file: str):
         with open(cred_file, "r") as f:
-            cred = json.load(f)
+            cred = orjson.loads(f.read())
         ai_cred = cred.get("ai-account", {})
         self.api_key = ai_cred.get("api_key")
         self.api_secret = ai_cred.get("api_secret")
@@ -100,7 +100,7 @@ class BybitV5Client:
     def _sign_request(self, method: str, endpoint: str, body: dict = None, params: dict = None) -> dict:
         ts = str(int(time.time() * 1000))
         recv_window = "5000"
-        body_str = json.dumps(body) if body else ""
+        body_str = orjson.dumps(body).decode('utf-8') if body else ""
         query_str = urllib.parse.urlencode(params) if params else ""
         raw_sign = ts + self.api_key + recv_window + (query_str if method == "GET" else body_str)
         signature = hmac.new(self.api_secret.encode('utf-8'), raw_sign.encode('utf-8'), hashlib.sha256).hexdigest()
@@ -117,7 +117,7 @@ class BybitV5Client:
         req = urllib.request.Request(url, data=req_data, headers=headers, method=method)
         try:
             with urllib.request.urlopen(req, timeout=5) as response:
-                return json.loads(response.read().decode('utf-8'))
+                return orjson.loads(response.read())
         except Exception as e:
             return {"retCode": -1, "retMsg": str(e)}
 
@@ -138,7 +138,7 @@ class BybitV5Client:
         url = f"{BYBIT_REST_URL}/v5/market/instruments-info?category=linear"
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=5) as resp:
-            return json.loads(resp.read().decode())
+            return orjson.loads(resp.read())
 
     def place_market_order_with_tpsl(self, symbol: str, side: str, qty_str: str, tp_str: str, sl_str: str, link_id: str):
         body = {
@@ -270,7 +270,7 @@ class DualExchangeCascadeHunter:
 
         try:
             with open(ACTIVE_SYMBOLS_PATH, "r") as f:
-                data = json.load(f)
+                data = orjson.loads(f.read())
             new_configs = data.get("symbols", {})
             if not new_configs:
                 return False
@@ -445,7 +445,7 @@ class DualExchangeCascadeHunter:
                 chunk_size = 10
                 for i in range(0, len(to_sub), chunk_size):
                     chunk = to_sub[i:i + chunk_size]
-                    await self.bybit_ws_conn.send(json.dumps({"op": "subscribe", "args": chunk}))
+                    await self.bybit_ws_conn.send(orjson.dumps({"op": "subscribe", "args": chunk}).decode('utf-8'))
                     if i + chunk_size < len(to_sub):
                         await asyncio.sleep(0.05)
                 self.bybit_subscribed_topics.update(to_sub)
@@ -455,16 +455,7 @@ class DualExchangeCascadeHunter:
                 chunk_size = 10
                 for i in range(0, len(to_unsub), chunk_size):
                     chunk = to_unsub[i:i + chunk_size]
-                    await self.bybit_ws_conn.send(json.dumps({"op": "unsubscribe", "args": chunk}))
-                    if i + chunk_size < len(to_unsub):
-                        await asyncio.sleep(0.05)
-                self.bybit_subscribed_topics.difference_update(to_unsub)
-
-            if to_unsub:
-                chunk_size = 10
-                for i in range(0, len(to_unsub), chunk_size):
-                    chunk = to_unsub[i:i + chunk_size]
-                    await self.bybit_ws_conn.send(json.dumps({"op": "unsubscribe", "args": chunk}))
+                    await self.bybit_ws_conn.send(orjson.dumps({"op": "unsubscribe", "args": chunk}).decode('utf-8'))
                     if i + chunk_size < len(to_unsub):
                         await asyncio.sleep(0.05)
                 self.bybit_subscribed_topics.difference_update(to_unsub)

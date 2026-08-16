@@ -1,509 +1,359 @@
 /**
- * Cascade Pro Dual-Chart Engine (1-Minute Candlestick / 1-Second High-Frequency Tick Flow)
- * With High-Visibility Liquidation Overlays (Candle Beacons & Tick Bursts)
+ * Cascade Pro Dual-Chart Engine
+ * [Top] 1-Minute Candlestick from Bybit Kline API (pre-built OHLCV)
+ * [Bot] 1-Second Real-Time Tick Flow from WebSocket stream
+ * Liquidation overlay on both panes
  */
 
 export class ProChart {
   constructor(candleCanvasId, tickCanvasId) {
     this.candleCanvas = document.getElementById(candleCanvasId);
     this.candleCtx = this.candleCanvas.getContext('2d');
-
     this.tickCanvas = document.getElementById(tickCanvasId);
     this.tickCtx = this.tickCanvas.getContext('2d');
 
     this.symbol = 'VELVETUSDT';
-    this.rawTrades = []; // raw trade ticks {t, p, s, v}
-    this.candles1m = []; // array of {t: minute_ms, o, h, l, c, v}
-    this.ticks1s = []; // array of {t: ms, p: price}
-    this.liquidations = []; // array of {t: ms, p: price, isLong: bool, usd: number, exch: string}
-    this.latestPrice = 0.0;
+    this.candles1m = [];       // pre-built {t,o,h,l,c,v} from Bybit Kline
+    this.ticks1s = [];         // live ticks {t,p} from WS, rolling 120s window
+    this.liquidations = [];    // {t,p,isLong,usd,exch}
+    this.latestPrice = 0;
     this.armedZone = null;
 
-    this.padding = { top: 32, right: 75, bottom: 22, left: 12 };
-    this.initResizeListeners();
+    this.pad = { top: 30, right: 72, bottom: 20, left: 8 };
+    this._rafPending = false;
+    this._dirtyCandles = false;
+    this._dirtyTicks = false;
+    this._initResize();
   }
 
-  initResizeListeners() {
-    const resize = () => {
-      const dpr = window.devicePixelRatio || 1;
+  _requestRender(candles = true, ticks = true) {
+    if (candles) this._dirtyCandles = true;
+    if (ticks) this._dirtyTicks = true;
+    if (!this._rafPending) {
+      this._rafPending = true;
+      requestAnimationFrame(() => {
+        this._rafPending = false;
+        if (this._dirtyCandles) { this._drawCandles(); this._dirtyCandles = false; }
+        if (this._dirtyTicks) { this._drawTicks(); this._dirtyTicks = false; }
+      });
+    }
+  }
 
-      // 1. Candle Canvas
-      if (this.candleCanvas && this.candleCanvas.parentElement) {
-        const r1 = this.candleCanvas.parentElement.getBoundingClientRect();
-        this.candleCanvas.width = r1.width * dpr;
-        this.candleCanvas.height = r1.height * dpr;
-        this.candleCtx.resetTransform();
-        this.candleCtx.scale(dpr, dpr);
-        this.candleWidth = r1.width;
-        this.candleHeight = r1.height;
+  _initResize() {
+    const go = () => {
+      const dpr = devicePixelRatio || 1;
+      for (const [canvas, ctx, wKey, hKey] of [
+        [this.candleCanvas, this.candleCtx, '_cw', '_ch'],
+        [this.tickCanvas, this.tickCtx, '_tw', '_th'],
+      ]) {
+        if (!canvas?.parentElement) continue;
+        const r = canvas.parentElement.getBoundingClientRect();
+        canvas.width = r.width * dpr;
+        canvas.height = r.height * dpr;
+        ctx.resetTransform();
+        ctx.scale(dpr, dpr);
+        this[wKey] = r.width;
+        this[hKey] = r.height;
       }
-
-      // 2. Tick Canvas
-      if (this.tickCanvas && this.tickCanvas.parentElement) {
-        const r2 = this.tickCanvas.parentElement.getBoundingClientRect();
-        this.tickCanvas.width = r2.width * dpr;
-        this.tickCanvas.height = r2.height * dpr;
-        this.tickCtx.resetTransform();
-        this.tickCtx.scale(dpr, dpr);
-        this.tickWidth = r2.width;
-        this.tickHeight = r2.height;
+      const th = this._th;
+      if (th) {
+        this._tickGrad = this.tickCtx.createLinearGradient(0, this.pad.top, 0, th - this.pad.bottom);
+        this._tickGrad.addColorStop(0, 'hsla(192,95%,50%,0.25)');
+        this._tickGrad.addColorStop(1, 'hsla(192,95%,50%,0.0)');
       }
-
-      this.renderAll();
+      this._requestRender();
     };
-
-    window.addEventListener('resize', resize);
-    setTimeout(resize, 50);
+    let _resizeTimer;
+    addEventListener('resize', () => { clearTimeout(_resizeTimer); _resizeTimer = setTimeout(go, 100); });
+    setTimeout(go, 60);
   }
 
+  /* ── public API ── */
   setSymbol(sym) {
     this.symbol = sym;
-    this.rawTrades = [];
     this.candles1m = [];
     this.ticks1s = [];
     this.liquidations = [];
     this.armedZone = null;
-    this.fetchHistory();
-  }
-
-  async fetchHistory() {
-    try {
-      const res = await fetch(`/api/history?symbol=${this.symbol}`);
-      const data = await res.json();
-
-      if (data.candles && data.candles.length > 0) {
-        this.candles1m = data.candles;
-      }
-
-      if (data.trades && data.trades.length > 0) {
-        this.rawTrades = data.trades;
-        this.ticks1s = data.trades.map(tr => ({ t: tr.t, p: tr.p }));
-        this.latestPrice = data.trades[data.trades.length - 1].p;
-      }
-
-      if (data.liquidations && Array.isArray(data.liquidations)) {
-        this.liquidations = data.liquidations.map(l => ({
-          t: l.t,
-          p: l.p,
-          isLong: l.pos_side === 'long' || l.s === 'sell',
-          usd: l.usd || 100,
-          exch: l.exch || 'binance'
-        }));
-      }
-
-      this.renderAll();
-    } catch (e) {
-      console.error('Failed to load history:', e);
-    }
-  }
-
-  build1mCandles() {
-    const candleMap = new Map();
-    for (const tr of this.rawTrades) {
-      const minTs = Math.floor(tr.t / 60000) * 60000;
-      if (!candleMap.has(minTs)) {
-        candleMap.set(minTs, {
-          t: minTs,
-          o: tr.p,
-          h: tr.p,
-          l: tr.p,
-          c: tr.p,
-          v: tr.v || 1.0
-        });
-      } else {
-        const c = candleMap.get(minTs);
-        c.h = Math.max(c.h, tr.p);
-        c.l = Math.min(c.l, tr.p);
-        c.c = tr.p;
-        c.v += (tr.v || 1.0);
-      }
-    }
-    this.candles1m = Array.from(candleMap.values()).sort((a, b) => a.t - b.t);
-  }
-
-  build1sTicks() {
-    this.ticks1s = this.rawTrades.map(tr => ({ t: tr.t, p: tr.p }));
-    if (this.ticks1s.length > 500) {
-      this.ticks1s = this.ticks1s.slice(-500);
-    }
+    this._fetch();
   }
 
   onTick(tick) {
     if (tick.symbol !== this.symbol) return;
     this.latestPrice = tick.price;
-    const nowMs = tick.time * 1000;
+    const ms = tick.time * 1000;
 
-    // 1. Update 1s Ticks
-    this.ticks1s.push({ t: nowMs, p: tick.price });
-    if (this.ticks1s.length > 500) {
-      this.ticks1s.shift();
-    }
+    // push tick
+    this.ticks1s.push({ t: ms, p: tick.price });
+    // keep last 120 seconds
+    const cutoff = ms - 120_000;
+    const idx = this.ticks1s.findIndex(t => t.t >= cutoff);
+    if (idx > 0) this.ticks1s.splice(0, idx);
+    else if (idx === -1) this.ticks1s.length = 0;
 
-    // 2. Update 1m Candle
-    const minTs = Math.floor(nowMs / 60000) * 60000;
-    if (this.candles1m.length === 0) {
-      this.candles1m.push({ t: minTs, o: tick.price, h: tick.price, l: tick.price, c: tick.price, v: 1 });
+    // update live candle
+    const minTs = Math.floor(ms / 60000) * 60000;
+    if (this.candles1m.length) {
+      const last = this.candles1m[this.candles1m.length - 1];
+      if (last.t === minTs) {
+        last.h = Math.max(last.h, tick.price);
+        last.l = Math.min(last.l, tick.price);
+        last.c = tick.price;
+        this._requestRender(false, true);
+      } else if (minTs > last.t) {
+        this.candles1m.push({ t: minTs, o: tick.price, h: tick.price, l: tick.price, c: tick.price, v: 0 });
+        if (this.candles1m.length > 80) this.candles1m.shift();
+        this._requestRender(true, true);
+      }
     } else {
-      const lastCandle = this.candles1m[this.candles1m.length - 1];
-      if (lastCandle.t === minTs) {
-        lastCandle.h = Math.max(lastCandle.h, tick.price);
-        lastCandle.l = Math.min(lastCandle.l, tick.price);
-        lastCandle.c = tick.price;
-        lastCandle.v += 1;
-      } else {
-        this.candles1m.push({ t: minTs, o: tick.price, h: tick.price, l: tick.price, c: tick.price, v: 1 });
-        if (this.candles1m.length > 60) this.candles1m.shift();
-      }
+        this._requestRender(true, true);
     }
-
-    this.renderAll();
   }
 
-  onLiquidation(event) {
-    if (event.symbol !== this.symbol) return;
-    const isLong = event.pos_side === 'long' || event.side === 'sell';
-    const ts = event.timestamp || (Date.now());
-    const price = event.price || this.latestPrice;
-    const usd = event.notional_usd || 100;
-    const exch = event.exchange || 'binance';
-
+  onLiquidation(ev) {
+    if (ev.symbol !== this.symbol) return;
     this.liquidations.push({
-      t: ts,
-      p: price,
-      isLong: isLong,
-      usd: usd,
-      exch: exch
+      t: ev.timestamp || Date.now(),
+      p: ev.price || this.latestPrice,
+      isLong: ev.pos_side === 'long' || ev.side === 'sell',
+      usd: ev.notional_usd || 100,
+      exch: (ev.exchange || 'bin').slice(0, 3).toUpperCase(),
     });
-
-    if (this.liquidations.length > 80) {
-      this.liquidations.shift();
-    }
-
-    this.renderAll();
+    if (this.liquidations.length > 60) this.liquidations.shift();
+    this._requestRender();
   }
 
-  setArmedZone(armed) {
-    this.armedZone = armed;
-    this.renderAll();
-  }
+  setArmedZone(a) { this.armedZone = a; this._requestRender(); }
 
-  renderAll() {
-    this.render1mCandles();
-    this.render1sTicks();
-  }
-
-  /* ==========================================================================
-     1. 1-MINUTE CANDLESTICK CHART WITH PROMINENT LIQUIDATION BEACONS
-     ========================================================================== */
-  render1mCandles() {
-    if (!this.candleWidth || !this.candleHeight) return;
-    const ctx = this.candleCtx;
-    const w = this.candleWidth;
-    const h = this.candleHeight;
-
-    ctx.clearRect(0, 0, w, h);
-
-    if (this.candles1m.length < 1) {
-      ctx.fillStyle = 'hsl(215, 20%, 70%)';
-      ctx.font = '12px "JetBrains Mono"';
-      ctx.textAlign = 'center';
-      ctx.fillText(`Loading 1-Minute Candlesticks for ${this.symbol}...`, w / 2, h / 2);
-      return;
-    }
-
-    const plotW = w - this.padding.left - this.padding.right;
-    const plotH = h - this.padding.top - this.padding.bottom;
-
-    // Price Bounds
-    let minP = Infinity;
-    let maxP = -Infinity;
-    for (const c of this.candles1m) {
-      if (c.l < minP) minP = c.l;
-      if (c.h > maxP) maxP = c.h;
-    }
-    const pRange = (maxP - minP) || (minP * 0.005);
-    minP -= pRange * 0.08;
-    maxP += pRange * 0.08;
-
-    const getY = (p) => this.padding.top + (1 - (p - minP) / (maxP - minP)) * plotH;
-
-    // 1. Grid Lines
-    ctx.strokeStyle = 'hsl(222, 25%, 15%)';
-    ctx.lineWidth = 1;
-    const gridSteps = 4;
-    for (let i = 0; i <= gridSteps; i++) {
-      const p = minP + (i / gridSteps) * (maxP - minP);
-      const y = getY(p);
-      ctx.beginPath();
-      ctx.moveTo(this.padding.left, y);
-      ctx.lineTo(w - this.padding.right, y);
-      ctx.stroke();
-
-      ctx.fillStyle = 'hsl(215, 16%, 48%)';
-      ctx.font = '10px "JetBrains Mono"';
-      ctx.textAlign = 'left';
-      ctx.fillText(p.toFixed(p > 10 ? 2 : p > 0.1 ? 4 : 6), w - this.padding.right + 6, y + 3);
-    }
-
-    // 2. Candlestick Bars
-    const candleCount = this.candles1m.length;
-    const slotW = plotW / Math.max(candleCount, 15);
-    const bodyW = Math.max(4, slotW * 0.7);
-
-    // Map candles to X coordinate
-    const candleXMap = [];
-
-    this.candles1m.forEach((c, idx) => {
-      const x = this.padding.left + (idx + 0.5) * slotW;
-      candleXMap.push({ candle: c, x: x });
-
-      const isGreen = c.c >= c.o;
-      const bodyColor = isGreen ? 'hsl(152, 76%, 46%)' : 'hsl(352, 85%, 58%)';
-
-      const openY = getY(c.o);
-      const closeY = getY(c.c);
-      const highY = getY(c.h);
-      const lowY = getY(c.l);
-
-      // Upper & Lower Wick
-      ctx.strokeStyle = bodyColor;
-      ctx.lineWidth = 1.3;
-      ctx.beginPath();
-      ctx.moveTo(x, highY);
-      ctx.lineTo(x, lowY);
-      ctx.stroke();
-
-      // Body Rectangle
-      const topY = Math.min(openY, closeY);
-      const botY = Math.max(openY, closeY);
-      const bodyH = Math.max(2, botY - topY);
-
-      ctx.fillStyle = bodyColor;
-      ctx.fillRect(x - bodyW / 2, topY, bodyW, bodyH);
-    });
-
-    // 3. Clear & Prominent Liquidation Markers plotted on 1m Candlesticks
-    for (const liq of this.liquidations) {
-      // Find matching candle by minute
-      const liqMin = Math.floor(liq.t / 60000) * 60000;
-      const matched = candleXMap.find(item => item.candle.t === liqMin);
-      
-      let x = 0;
-      if (matched) {
-        x = matched.x;
-      } else {
-        const firstT = this.candles1m[0].t;
-        const lastT = this.candles1m[this.candles1m.length - 1].t + 60000;
-        if (liq.t < firstT || liq.t > lastT) continue;
-        const prog = (liq.t - firstT) / (lastT - firstT);
-        x = this.padding.left + prog * plotW;
+  /* ── data fetch ── */
+  async _fetch() {
+    try {
+      const r = await fetch(`/api/history?symbol=${this.symbol}`);
+      const d = await r.json();
+      if (d.candles?.length) {
+        this.candles1m = d.candles;
+        const lc = d.candles[d.candles.length - 1];
+        this.latestPrice = lc.c;
       }
-
-      const y = getY(liq.p);
-      const isLong = liq.isLong;
-      const color = isLong ? 'hsl(352, 85%, 58%)' : 'hsl(152, 76%, 46%)';
-      const usdStr = liq.usd >= 1000 ? `$${(liq.usd / 1000).toFixed(1)}k` : `$${Math.round(liq.usd)}`;
-      const exchTag = (liq.exch || 'BIN').slice(0, 3).toUpperCase();
-
-      // Vertical Laser Line
-      ctx.strokeStyle = isLong ? 'hsla(352, 85%, 58%, 0.35)' : 'hsla(152, 76%, 46%, 0.35)';
-      ctx.lineWidth = 1;
-      ctx.setLineDash([2, 2]);
-      ctx.beginPath();
-      ctx.moveTo(x, this.padding.top);
-      ctx.lineTo(x, h - this.padding.bottom);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      // Beacon Marker Tag (Above high for Long Liq, Below low for Short Liq)
-      const tagY = isLong ? Math.max(this.padding.top + 10, y - 18) : Math.min(h - this.padding.bottom - 10, y + 18);
-
-      // Bubble
-      ctx.beginPath();
-      ctx.arc(x, tagY, 6, 0, Math.PI * 2);
-      ctx.fillStyle = color;
-      ctx.fill();
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-
-      // Text Badge
-      ctx.fillStyle = isLong ? 'hsla(352, 85%, 58%, 0.9)' : 'hsla(152, 76%, 46%, 0.9)';
-      const text = `${isLong ? '🔴' : '🟢'} ${exchTag} ${usdStr}`;
-      ctx.font = 'bold 9px "JetBrains Mono"';
-      const textW = ctx.measureText(text).width + 6;
-      ctx.fillRect(x - textW / 2, tagY - 14, textW, 12);
-
-      ctx.fillStyle = '#ffffff';
-      ctx.textAlign = 'center';
-      ctx.fillText(text, x, tagY - 5);
-    }
-
-    // 4. Current Price Cursor Line
-    const lastY = getY(this.latestPrice);
-    ctx.setLineDash([3, 3]);
-    ctx.strokeStyle = 'hsl(210, 40%, 80%)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(this.padding.left, lastY);
-    ctx.lineTo(w - this.padding.right, lastY);
-    ctx.stroke();
-    ctx.setLineDash([]);
+      if (d.trades?.length) {
+        this.ticks1s = d.trades.map(tr => ({ t: tr.t, p: tr.p }));
+      } else if (d.candles?.length && this.ticks1s.length < 2) {
+        const now = Date.now();
+        const lc = d.candles[d.candles.length - 1];
+        const prevC = d.candles.length > 1 ? d.candles[d.candles.length - 2] : lc;
+        this.ticks1s = [
+          { t: now - 30000, p: prevC.c },
+          { t: now - 15000, p: lc.o },
+          { t: now, p: lc.c }
+        ];
+      }
+      if (d.liquidations?.length) {
+        this.liquidations = d.liquidations.map(l => ({
+          t: l.t, p: l.p,
+          isLong: l.pos_side === 'long',
+          usd: l.usd || 100,
+          exch: (l.exch || 'bin').slice(0, 3).toUpperCase(),
+        }));
+      }
+      this._requestRender();
+    } catch (e) { console.error('chart fetch err', e); }
   }
 
-  /* ==========================================================================
-     2. 1-SECOND REAL-TIME TICK FLOW WITH HIGH-FREQUENCY LIQUIDATION BURSTS
-     ========================================================================== */
-  render1sTicks() {
-    if (!this.tickWidth || !this.tickHeight) return;
-    const ctx = this.tickCtx;
-    const w = this.tickWidth;
-    const h = this.tickHeight;
+  // _draw() method removed as it's replaced by _requestRender
 
+  /* ====================================================================
+     1-MIN CANDLESTICK
+     ==================================================================== */
+  _drawCandles() {
+    const ctx = this.candleCtx, w = this._cw, h = this._ch;
+    if (!w || !h) return;
     ctx.clearRect(0, 0, w, h);
-
-    if (this.ticks1s.length < 2) {
-      ctx.fillStyle = 'hsl(215, 20%, 70%)';
-      ctx.font = '12px "JetBrains Mono"';
+    const candles = this.candles1m;
+    if (!candles.length) {
+      ctx.fillStyle = '#7a8ba6'; ctx.font = '12px "JetBrains Mono",monospace';
       ctx.textAlign = 'center';
-      ctx.fillText(`Streaming 1-Second Sub-Tick Flow for ${this.symbol}...`, w / 2, h / 2);
+      ctx.fillText(`${this.symbol} 1분봉 로딩 중...`, w / 2, h / 2);
       return;
     }
 
-    const plotW = w - this.padding.left - this.padding.right;
-    const plotH = h - this.padding.top - this.padding.bottom;
+    const pW = w - this.pad.left - this.pad.right;
+    const pH = h - this.pad.top - this.pad.bottom;
 
-    // Price Bounds
-    let minP = Infinity;
-    let maxP = -Infinity;
-    for (const t of this.ticks1s) {
-      if (t.p < minP) minP = t.p;
-      if (t.p > maxP) maxP = t.p;
-    }
-    const pRange = (maxP - minP) || (minP * 0.003);
-    minP -= pRange * 0.08;
-    maxP += pRange * 0.08;
+    let lo = Infinity, hi = -Infinity;
+    for (const c of candles) { if (c.l < lo) lo = c.l; if (c.h > hi) hi = c.h; }
+    const rng = (hi - lo) || lo * 0.005;
+    lo -= rng * 0.06; hi += rng * 0.06;
 
-    const getY = (p) => this.padding.top + (1 - (p - minP) / (maxP - minP)) * plotH;
-    const getX = (idx) => this.padding.left + (idx / (this.ticks1s.length - 1)) * plotW;
+    const yOf = p => this.pad.top + (1 - (p - lo) / (hi - lo)) * pH;
+    const n = candles.length;
+    const slot = pW / Math.max(n, 12);
+    const bw = Math.max(3, slot * 0.65);
 
-    // 1. Grid Lines
-    ctx.strokeStyle = 'hsl(222, 25%, 15%)';
-    ctx.lineWidth = 1;
-    const gridSteps = 4;
-    for (let i = 0; i <= gridSteps; i++) {
-      const p = minP + (i / gridSteps) * (maxP - minP);
-      const y = getY(p);
-      ctx.beginPath();
-      ctx.moveTo(this.padding.left, y);
-      ctx.lineTo(w - this.padding.right, y);
-      ctx.stroke();
+    // grid
+    this._grid(ctx, w, h, lo, hi, yOf);
 
-      ctx.fillStyle = 'hsl(215, 16%, 48%)';
-      ctx.font = '10px "JetBrains Mono"';
-      ctx.textAlign = 'left';
-      ctx.fillText(p.toFixed(p > 10 ? 2 : p > 0.1 ? 4 : 6), w - this.padding.right + 6, y + 3);
-    }
+    // candles
+    const xMap = new Map();
+    candles.forEach((c, i) => {
+      const x = this.pad.left + (i + 0.5) * slot;
+      xMap.set(c.t, x);
+      const up = c.c >= c.o;
+      const col = up ? '#2ecc71' : '#e74c6b';
+      ctx.strokeStyle = col; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(x, yOf(c.h)); ctx.lineTo(x, yOf(c.l)); ctx.stroke();
+      const t = Math.min(yOf(c.o), yOf(c.c));
+      const b = Math.max(yOf(c.o), yOf(c.c));
+      ctx.fillStyle = col;
+      ctx.fillRect(x - bw / 2, t, bw, Math.max(2, b - t));
+    });
 
-    // 2. Armed Precursor Zone (if active)
-    if (this.armedZone && Date.now() / 1000 <= this.armedZone.expires) {
-      const isShort = this.armedZone.target_side === 'Sell';
-      ctx.fillStyle = isShort ? 'hsla(352, 85%, 58%, 0.10)' : 'hsla(152, 76%, 46%, 0.10)';
-      ctx.fillRect(this.padding.left, this.padding.top, plotW, plotH);
-    }
-
-    // 3. Smooth Area Fill
-    const gradient = ctx.createLinearGradient(0, this.padding.top, 0, h - this.padding.bottom);
-    gradient.addColorStop(0, 'hsla(192, 95%, 50%, 0.28)');
-    gradient.addColorStop(1, 'hsla(192, 95%, 50%, 0.0)');
-
-    ctx.beginPath();
-    ctx.moveTo(getX(0), getY(this.ticks1s[0].p));
-    for (let i = 1; i < this.ticks1s.length; i++) {
-      ctx.lineTo(getX(i), getY(this.ticks1s[i].p));
-    }
-    ctx.lineTo(getX(this.ticks1s.length - 1), h - this.padding.bottom);
-    ctx.lineTo(getX(0), h - this.padding.bottom);
-    ctx.closePath();
-    ctx.fillStyle = gradient;
-    ctx.fill();
-
-    // 4. Tick Line
-    ctx.beginPath();
-    ctx.moveTo(getX(0), getY(this.ticks1s[0].p));
-    for (let i = 1; i < this.ticks1s.length; i++) {
-      ctx.lineTo(getX(i), getY(this.ticks1s[i].p));
-    }
-    ctx.strokeStyle = 'hsl(192, 95%, 50%)';
-    ctx.lineWidth = 1.8;
-    ctx.stroke();
-
-    // 5. Clear Liquidation Bursts on 1s Tick Flow
+    // liquidation markers on candles
+    const firstT = candles[0].t;
+    const lastT = candles[n - 1].t + 60000;
     for (const liq of this.liquidations) {
-      const firstT = this.ticks1s[0].t;
-      const lastT = this.ticks1s[this.ticks1s.length - 1].t;
       if (liq.t < firstT || liq.t > lastT) continue;
-
-      const progress = (liq.t - firstT) / (lastT - firstT);
-      const x = this.padding.left + progress * plotW;
-      const y = getY(liq.p);
-      const isLong = liq.isLong;
-      const color = isLong ? 'hsl(352, 85%, 58%)' : 'hsl(152, 76%, 46%)';
-      const usdStr = liq.usd >= 1000 ? `$${(liq.usd / 1000).toFixed(1)}k` : `$${Math.round(liq.usd)}`;
-      const exchTag = (liq.exch || 'BIN').slice(0, 3).toUpperCase();
-
-      // Vertical Laser Line
-      ctx.strokeStyle = isLong ? 'hsla(352, 85%, 58%, 0.4)' : 'hsla(152, 76%, 46%, 0.4)';
-      ctx.lineWidth = 1;
-      ctx.setLineDash([2, 2]);
-      ctx.beginPath();
-      ctx.moveTo(x, this.padding.top);
-      ctx.lineTo(x, h - this.padding.bottom);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      // Burst Circle
-      const radius = Math.min(10, Math.max(5, Math.log10(liq.usd || 100) * 2.2));
-      ctx.beginPath();
-      ctx.arc(x, y, radius, 0, Math.PI * 2);
-      ctx.fillStyle = color;
-      ctx.fill();
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-
-      // Floating Badge Label
-      ctx.fillStyle = isLong ? 'hsla(352, 85%, 58%, 0.95)' : 'hsla(152, 76%, 46%, 0.95)';
-      const text = `${isLong ? '🔴' : '🟢'} ${exchTag} ${usdStr}`;
-      ctx.font = 'bold 9px "JetBrains Mono"';
-      const textW = ctx.measureText(text).width + 6;
-      const badgeY = isLong ? y - radius - 14 : y + radius + 4;
-      ctx.fillRect(x - textW / 2, badgeY, textW, 12);
-
-      ctx.fillStyle = '#ffffff';
-      ctx.textAlign = 'center';
-      ctx.fillText(text, x, badgeY + 9);
+      // find matching candle
+      const liqMin = Math.floor(liq.t / 60000) * 60000;
+      const matchX = xMap.get(liqMin);
+      const x = matchX != null ? matchX : this.pad.left + ((liq.t - firstT) / (lastT - firstT)) * pW;
+      const y = yOf(liq.p);
+      this._liqMark(ctx, x, y, liq, h);
     }
 
-    // 6. Current Price Badge Box
-    const lastY = getY(this.latestPrice);
-    ctx.setLineDash([3, 3]);
-    ctx.strokeStyle = 'hsl(210, 40%, 96%)';
-    ctx.lineWidth = 1;
+    // price line
+    this._priceLine(ctx, w, yOf(this.latestPrice), null);
+  }
+
+  /* ====================================================================
+     1-SEC TICK FLOW
+     ==================================================================== */
+  _drawTicks() {
+    const ctx = this.tickCtx, w = this._tw, h = this._th;
+    if (!w || !h) return;
+    ctx.clearRect(0, 0, w, h);
+    const ticks = this.ticks1s;
+    if (ticks.length < 2) {
+      ctx.fillStyle = '#7a8ba6'; ctx.font = '12px "JetBrains Mono",monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${this.symbol} 실시간 틱 수신 대기 중...`, w / 2, h / 2);
+      return;
+    }
+
+    const pW = w - this.pad.left - this.pad.right;
+    const pH = h - this.pad.top - this.pad.bottom;
+
+    let lo = Infinity, hi = -Infinity;
+    for (const t of ticks) { if (t.p < lo) lo = t.p; if (t.p > hi) hi = t.p; }
+    const rng = (hi - lo) || lo * 0.003;
+    lo -= rng * 0.08; hi += rng * 0.08;
+
+    const yOf = p => this.pad.top + (1 - (p - lo) / (hi - lo)) * pH;
+    const firstT = ticks[0].t, lastT = ticks[ticks.length - 1].t;
+    const tRange = (lastT - firstT) || 1;
+    const xOf = t => this.pad.left + ((t - firstT) / tRange) * pW;
+
+    // grid
+    this._grid(ctx, w, h, lo, hi, yOf);
+
+    // armed zone
+    if (this.armedZone && Date.now() / 1000 <= this.armedZone.expires) {
+      ctx.fillStyle = this.armedZone.target_side === 'Sell'
+        ? 'hsla(352,85%,58%,0.08)' : 'hsla(152,76%,46%,0.08)';
+      ctx.fillRect(this.pad.left, this.pad.top, pW, pH);
+    }
+
+    // area fill
+    let grad = this._tickGrad;
+    if (!grad) {
+      grad = ctx.createLinearGradient(0, this.pad.top, 0, h - this.pad.bottom);
+      grad.addColorStop(0, 'hsla(192,95%,50%,0.25)');
+      grad.addColorStop(1, 'hsla(192,95%,50%,0.0)');
+      this._tickGrad = grad;
+    }
     ctx.beginPath();
-    ctx.moveTo(this.padding.left, lastY);
-    ctx.lineTo(w - this.padding.right, lastY);
-    ctx.stroke();
-    ctx.setLineDash([]);
+    ctx.moveTo(xOf(ticks[0].t), yOf(ticks[0].p));
+    for (let i = 1; i < ticks.length; i++) ctx.lineTo(xOf(ticks[i].t), yOf(ticks[i].p));
+    ctx.lineTo(xOf(lastT), h - this.pad.bottom);
+    ctx.lineTo(xOf(firstT), h - this.pad.bottom);
+    ctx.closePath();
+    ctx.fillStyle = grad; ctx.fill();
 
-    ctx.fillStyle = 'hsl(192, 95%, 50%)';
-    const badgeW = 65;
-    const badgeH = 18;
-    ctx.fillRect(w - this.padding.right + 2, lastY - badgeH / 2, badgeW, badgeH);
+    // line
+    ctx.beginPath();
+    ctx.moveTo(xOf(ticks[0].t), yOf(ticks[0].p));
+    for (let i = 1; i < ticks.length; i++) ctx.lineTo(xOf(ticks[i].t), yOf(ticks[i].p));
+    ctx.strokeStyle = 'hsl(192,95%,50%)'; ctx.lineWidth = 1.8; ctx.stroke();
 
-    ctx.fillStyle = '#0a0e17';
-    ctx.font = 'bold 10px "JetBrains Mono"';
-    ctx.textAlign = 'center';
-    ctx.fillText(this.latestPrice.toFixed(this.latestPrice > 10 ? 2 : this.latestPrice > 0.1 ? 4 : 6), w - this.padding.right + 2 + badgeW / 2, lastY + 4);
+    // liquidation markers on ticks
+    for (const liq of this.liquidations) {
+      if (liq.t < firstT || liq.t > lastT) continue;
+      this._liqMark(ctx, xOf(liq.t), yOf(liq.p), liq, h);
+    }
+
+    // price badge
+    this._priceLine(ctx, w, yOf(this.latestPrice), this.latestPrice);
+  }
+
+  /* ── shared helpers ── */
+  _grid(ctx, w, h, lo, hi, yOf) {
+    ctx.strokeStyle = 'hsl(222,25%,15%)'; ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+      const p = lo + (i / 4) * (hi - lo);
+      const y = yOf(p);
+      ctx.beginPath(); ctx.moveTo(this.pad.left, y); ctx.lineTo(w - this.pad.right, y); ctx.stroke();
+      ctx.fillStyle = '#6b7a8d'; ctx.font = '10px "JetBrains Mono",monospace'; ctx.textAlign = 'left';
+      ctx.fillText(this._fmt(p), w - this.pad.right + 4, y + 3);
+    }
+  }
+
+  _liqMark(ctx, x, y, liq, h) {
+    const col = liq.isLong ? '#e74c6b' : '#2ecc71';
+    // vertical dashed line
+    ctx.save();
+    ctx.strokeStyle = liq.isLong ? 'rgba(231,76,107,0.35)' : 'rgba(46,204,113,0.35)';
+    ctx.lineWidth = 1; ctx.setLineDash([2, 2]);
+    ctx.beginPath(); ctx.moveTo(x, this.pad.top); ctx.lineTo(x, h - this.pad.bottom); ctx.stroke();
+    ctx.restore();
+
+    // circle
+    const r = Math.min(9, Math.max(4, Math.log10(liq.usd || 100) * 2.2));
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = col; ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.3; ctx.stroke();
+
+    // label badge
+    const side = liq.isLong ? 'LONG' : 'SHORT';
+    const usd = liq.usd >= 1000 ? `$${(liq.usd / 1000).toFixed(1)}k` : `$${Math.round(liq.usd)}`;
+    const txt = `${liq.exch} ${side} ${usd}`;
+    ctx.font = 'bold 9px "JetBrains Mono",monospace';
+    const tw = ctx.measureText(txt).width + 8;
+    const by = liq.isLong ? y - r - 16 : y + r + 4;
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.roundRect(x - tw / 2, by, tw, 14, 3);
+    ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
+    ctx.fillText(txt, x, by + 10);
+  }
+
+  _priceLine(ctx, w, y, price) {
+    ctx.save();
+    ctx.setLineDash([3, 3]);
+    ctx.strokeStyle = 'hsl(210,40%,80%)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(this.pad.left, y); ctx.lineTo(w - this.pad.right, y); ctx.stroke();
+    ctx.restore();
+    if (price != null) {
+      ctx.fillStyle = 'hsl(192,95%,50%)';
+      ctx.fillRect(w - this.pad.right + 1, y - 9, 68, 18);
+      ctx.fillStyle = '#0a0e17'; ctx.font = 'bold 10px "JetBrains Mono",monospace'; ctx.textAlign = 'center';
+      ctx.fillText(this._fmt(price), w - this.pad.right + 35, y + 3);
+    }
+  }
+
+  _fmt(p) {
+    if (p > 100) return p.toFixed(2);
+    if (p > 1) return p.toFixed(4);
+    if (p > 0.01) return p.toFixed(5);
+    return p.toFixed(6);
   }
 }
