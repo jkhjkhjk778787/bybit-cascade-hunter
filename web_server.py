@@ -216,14 +216,30 @@ class BybitTradingService:
             for p in res.get("result", {}).get("list", []):
                 size = _safe_float(p.get("size"), 0.0)
                 if size > 0:
+                    entry_px = _safe_float(p.get("avgPrice"), 0.0)
+                    mark_px = _safe_float(p.get("markPrice"), entry_px)
+                    unreal_pnl = _safe_float(p.get("unrealisedPnl"), 0.0)
+                    lev = _safe_float(p.get("leverage"), 15.0)
+
+                    # 바이비트 시장가(Taker) 진입 0.055% + 청산 0.055% = 왕복 0.11% 수수료 산출
+                    entry_val = size * entry_px
+                    pos_val = size * mark_px if mark_px > 0 else entry_val
+                    open_fee = entry_val * 0.00055
+                    close_fee = pos_val * 0.00055
+                    est_fee = round(open_fee + close_fee, 6)
+                    net_pnl = round(unreal_pnl - est_fee, 6)
+
                     positions.append({
                         "symbol": p.get("symbol"),
                         "side": p.get("side"),
                         "size": size,
-                        "entryPrice": _safe_float(p.get("avgPrice"), 0.0),
-                        "markPrice": _safe_float(p.get("markPrice"), 0.0),
-                        "unrealisedPnl": _safe_float(p.get("unrealisedPnl"), 0.0),
-                        "leverage": _safe_float(p.get("leverage"), 15.0),
+                        "entryPrice": entry_px,
+                        "markPrice": mark_px,
+                        "positionValue": round(pos_val, 4),
+                        "unrealisedPnl": unreal_pnl,
+                        "estFee": est_fee,
+                        "netPnl": net_pnl,
+                        "leverage": lev,
                         "stopLoss": _safe_float(p.get("stopLoss"), 0.0),
                         "takeProfit": _safe_float(p.get("takeProfit"), 0.0),
                         "updatedTime": int(_safe_float(p.get("updatedTime"), 0))

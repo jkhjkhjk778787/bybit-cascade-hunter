@@ -283,8 +283,16 @@ export class TerminalComponent {
     const frag = document.createDocumentFragment();
     positions.forEach(p => {
       const isLong = p.side === 'Buy';
-      const pnl = p.unrealisedPnl;
-      const pnlClass = pnl >= 0 ? 'positive' : 'negative';
+      const grossPnl = parseFloat(p.unrealisedPnl || 0);
+      const grossPnlClass = grossPnl >= 0 ? 'positive' : 'negative';
+
+      // 바이비트 시장가(Taker) 진입 0.055% + 청산 0.055% = 왕복 0.11% 수수료 산출
+      const size = Math.abs(parseFloat(p.size || 0));
+      const markPrice = parseFloat(p.markPrice || p.entryPrice || 0);
+      const positionValue = p.positionValue || (size * markPrice);
+      const estFee = p.estFee != null ? p.estFee : (positionValue * 0.00055 * 2.0);
+      const netPnl = p.netPnl != null ? p.netPnl : (grossPnl - estFee);
+      const netPnlClass = netPnl >= 0 ? 'positive' : 'negative';
 
       const elapsedSec = p.elapsedSec != null ? Math.max(0, Math.round(p.elapsedSec)) : 0;
       const mins = Math.floor(elapsedSec / 60);
@@ -298,22 +306,30 @@ export class TerminalComponent {
       card.title = `${p.symbol} 차트 및 주문 터미널로 즉시 전환`;
       card.innerHTML = `
         <div class="pos-header">
-          <span class="pos-sym" style="color:${isLong ? 'var(--long-green)' : 'var(--short-red)'};">
+          <span class="pos-sym" style="color:${isLong ? 'var(--long-green)' : 'var(--short-red)'}; font-weight:800; font-size:13px;">
             ${isLong ? '🟢 LONG' : '🔴 SHORT'} ${p.symbol} (${p.leverage}x)
           </span>
-          <span class="pos-pnl ${pnlClass}">
-            ${pnl >= 0 ? '+' : ''}${pnl.toFixed(4)} USDT
-          </span>
+          <div style="text-align:right;">
+            <div class="pos-pnl ${grossPnlClass}" style="font-size:11px; opacity:0.85;">
+              미실현: ${grossPnl >= 0 ? '+' : ''}${grossPnl.toFixed(4)} USDT
+            </div>
+            <div class="pos-pnl ${netPnlClass}" style="font-size:13px; font-weight:900; margin-top:1px;">
+              💰 실순익: ${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(4)} USDT
+            </div>
+          </div>
         </div>
-        <div class="pos-details">
-          <span>진입가: $${p.entryPrice}</span>
-          <span>현재가: $${p.markPrice}</span>
-          <span>수량: ${p.size}</span>
-          <span>TP/SL: ${p.takeProfit || '-'}/${p.stopLoss || '-'}</span>
+        <div class="pos-details" style="margin-top:6px; font-size:11.5px; row-gap:3px;">
+          <span>진입가: <b>$${p.entryPrice}</b></span>
+          <span>현재가: <b>$${p.markPrice}</b></span>
+          <span>규모: <b>${p.size} ($${positionValue.toFixed(2)})</b></span>
+          <span style="color:var(--warn-amber);">시장가 수수료: <b>-$${estFee.toFixed(4)}</b></span>
+          <span>TP/SL: <b>${p.takeProfit || '-'}/${p.stopLoss || '-'}</b></span>
+          <span style="color:var(--text-dim);">경과: <b style="color:var(--brand-cyan);">${elapsedStr}</b></span>
         </div>
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px; font-size:11px; font-family:var(--font-mono);">
-          <span style="color:var(--text-dim);">⏱️ 경과: <b style="color:var(--brand-cyan); font-weight:800;">${elapsedStr}</b></span>
-          <button class="btn-close-pos" data-sym="${p.symbol}" style="padding:3px 8px; font-size:10px; border-radius:4px;">시장가 종료</button>
+        <div style="display:flex; justify-content:flex-end; margin-top:8px;">
+          <button class="btn-close-pos" data-sym="${p.symbol}" style="padding:5px 12px; font-size:11px; font-weight:800; border-radius:4px; background:var(--short-red); color:white; border:none; cursor:pointer; box-shadow:0 2px 6px rgba(0,0,0,0.3);">
+            🛑 시장가 즉시 종료 (실순익 확정)
+          </button>
         </div>
       `;
 

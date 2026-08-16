@@ -2,10 +2,10 @@
  * Master Application Controller & WebSocket Connection Manager
  */
 
-import { ProChart } from './chart.js?v=20260817_0520';
-import { RadarComponent } from './radar.js?v=20260817_0520';
-import { TerminalComponent } from './terminal.js?v=20260817_0520';
-import { OrderflowComponent } from './orderflow.js?v=20260817_0520';
+import { ProChart } from './chart.js?v=20260817_0524';
+import { RadarComponent } from './radar.js?v=20260817_0524';
+import { TerminalComponent } from './terminal.js?v=20260817_0524';
+import { OrderflowComponent } from './orderflow.js?v=20260817_0524';
 
 class CascadeTradingApp {
   constructor() {
@@ -230,17 +230,49 @@ class CascadeTradingApp {
     const equityEl = document.getElementById('accountEquity');
     const availEl = document.getElementById('accountAvailable');
     const pnlEl = document.getElementById('accountPnl');
+    const netPnlEl = document.getElementById('accountNetPnl');
+    const feeSubtextEl = document.getElementById('accountFeeSubtext');
 
     if (equityEl) equityEl.textContent = `${balance.equity?.toFixed(2) || '0.00'} USDT`;
     if (availEl) availEl.textContent = `${balance.availableBalance?.toFixed(2) || '0.00'} USDT`;
 
-    let totalPnl = 0.0;
+    let totalGrossPnl = 0.0;
+    let totalEstFee = 0.0;
+
     if (positions && positions.length > 0) {
-      totalPnl = positions.reduce((acc, p) => acc + (p.unrealisedPnl || 0), 0);
+      positions.forEach(p => {
+        const grossPnl = parseFloat(p.unrealisedPnl || 0);
+        totalGrossPnl += grossPnl;
+
+        // 바이비트 선물 시장가(Taker) 수수료: 진입 0.055% + 청산 0.055% = 왕복 0.11%
+        const size = Math.abs(parseFloat(p.size || 0));
+        const markPrice = parseFloat(p.markPrice || p.entryPrice || 0);
+        const positionValue = p.positionValue || (size * markPrice);
+        const estFee = p.estFee != null ? p.estFee : (positionValue * 0.00055 * 2.0);
+        totalEstFee += estFee;
+      });
     }
+
+    const netPnl = totalGrossPnl - totalEstFee;
+
     if (pnlEl) {
-      pnlEl.textContent = `${totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(4)} USDT`;
-      pnlEl.className = `summary-value ${totalPnl >= 0 ? 'positive' : 'negative'}`;
+      pnlEl.textContent = `${totalGrossPnl >= 0 ? '+' : ''}${totalGrossPnl.toFixed(4)} USDT`;
+      pnlEl.className = `summary-value ${totalGrossPnl >= 0 ? 'positive' : 'negative'}`;
+    }
+
+    if (netPnlEl) {
+      netPnlEl.textContent = `${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(4)} USDT`;
+      netPnlEl.className = `summary-value ${netPnl >= 0 ? 'positive' : 'negative'}`;
+    }
+
+    if (feeSubtextEl) {
+      if (totalEstFee > 0) {
+        feeSubtextEl.textContent = `(시장가 왕복 수수료 -$${totalEstFee.toFixed(4)} 차감)`;
+        feeSubtextEl.style.color = 'var(--warn-amber)';
+      } else {
+        feeSubtextEl.textContent = `(시장가 왕복 0.11% 반영)`;
+        feeSubtextEl.style.color = 'var(--text-muted)';
+      }
     }
   }
 }

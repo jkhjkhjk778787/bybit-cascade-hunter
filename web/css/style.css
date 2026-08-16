@@ -160,13 +160,21 @@ html, body {
 .account-summary {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 18px;
 }
 
 .summary-item {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
+}
+
+.summary-item.highlight-net-pnl {
+  background: rgba(0, 240, 255, 0.06);
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 240, 255, 0.25);
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.15);
 }
 
 .summary-label {
