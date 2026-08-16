@@ -17,7 +17,7 @@ class CascadeTradingApp {
     this.reconnectTimer = null;
 
     // Components
-    this.chart = new ProChart('candle1mCanvas', 'tick1sCanvas');
+    this.chart = new ProChart('candle1mCanvas', 'tick1sCanvas', 'cvdCanvas');
     this.radar = new RadarComponent('cascadeList', 'binanceFeedList', 'bybitFeedList');
     this.terminal = new TerminalComponent(this);
     this.orderflow = new OrderflowComponent('alertFeed');
@@ -166,6 +166,10 @@ class CascadeTradingApp {
           this.selectSymbol(msg.event.symbol);
           this.terminal.showToast(`⚡ [연쇄 청산] ${msg.event.symbol} 차트로 자동 전환!`, 'warn');
         }
+        break;
+
+      case 'CVD_UPDATE':
+        this.chart.onCvdUpdate(msg);
         break;
 
       case 'TICKER':

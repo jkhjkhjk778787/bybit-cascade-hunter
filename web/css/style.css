@@ -651,7 +651,7 @@ html, body {
   letter-spacing: 0.5px;
 }
 
-#candle1mCanvas, #tick1sCanvas {
+#candle1mCanvas, #tick1sCanvas, #cvdCanvas {
   width: 100%;
   height: 100%;
   display: block;

@@ -115,10 +115,21 @@
             <div class="subpane-label">📊 1-MIN CANDLESTICK (1분봉)</div>
             <canvas id="candle1mCanvas"></canvas>
           </div>
-          <!-- Bottom Subpane: 1-Second Real-Time High-Frequency Tick Chart -->
+          <!-- Middle Subpane: 1-Second Real-Time High-Frequency Tick Chart -->
           <div class="chart-subpane">
             <div class="subpane-label">⚡ 1-SEC REAL-TIME TICK FLOW (1초 정밀 틱)</div>
             <canvas id="tick1sCanvas"></canvas>
+          </div>
+          <!-- Bottom Subpane: Real-Time Dual CVD Chart (Binance vs Bybit) -->
+          <div class="chart-subpane">
+            <div class="subpane-label" style="display:flex; justify-content:space-between; align-items:center; width:calc(100% - 24px);">
+              <span>🌊 DUAL-EXCHANGE CVD (누적 델타: 🟡 Binance vs 🟠 Bybit)</span>
+              <div id="cvdLiveLegend" style="display:flex; gap:12px; font-size:10px;">
+                <span id="cvdBinLegend" style="color:var(--binance-yellow); font-weight:800;">BIN: $0</span>
+                <span id="cvdBybLegend" style="color:var(--bybit-gold); font-weight:800;">BYB: $0</span>
+              </div>
+            </div>
+            <canvas id="cvdCanvas"></canvas>
           </div>
         </div>
       </section>

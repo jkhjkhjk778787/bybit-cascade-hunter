@@ -6,11 +6,13 @@
  */
 
 export class ProChart {
-  constructor(candleCanvasId, tickCanvasId) {
+  constructor(candleCanvasId, tickCanvasId, cvdCanvasId) {
     this.candleCanvas = document.getElementById(candleCanvasId);
-    this.candleCtx = this.candleCanvas.getContext('2d');
+    this.candleCtx = this.candleCanvas?.getContext('2d');
     this.tickCanvas = document.getElementById(tickCanvasId);
-    this.tickCtx = this.tickCanvas.getContext('2d');
+    this.tickCtx = this.tickCanvas?.getContext('2d');
+    this.cvdCanvas = document.getElementById(cvdCanvasId);
+    this.cvdCtx = this.cvdCanvas?.getContext('2d');
 
     this.symbol = 'VELVETUSDT';
     this.candles1m = [];       // pre-built {t,o,h,l,c,v} from Bybit Kline
@@ -19,22 +21,33 @@ export class ProChart {
     this.latestPrice = 0;
     this.armedZone = null;
 
+    // Cumulative Volume Delta (CVD) starting from page click
+    this.binanceCvd = 0.0;
+    this.bybitCvd = 0.0;
+    this.cvdPoints = []; // [{t, bin, byb}]
+
+    this._cvdBinLegendEl = document.getElementById('cvdBinLegend');
+    this._cvdBybLegendEl = document.getElementById('cvdBybLegend');
+
     this.pad = { top: 30, right: 72, bottom: 20, left: 8 };
     this._rafPending = false;
     this._dirtyCandles = false;
     this._dirtyTicks = false;
+    this._dirtyCvd = false;
     this._initResize();
   }
 
-  _requestRender(candles = true, ticks = true) {
+  _requestRender(candles = true, ticks = true, cvd = true) {
     if (candles) this._dirtyCandles = true;
     if (ticks) this._dirtyTicks = true;
+    if (cvd) this._dirtyCvd = true;
     if (!this._rafPending) {
       this._rafPending = true;
       requestAnimationFrame(() => {
         this._rafPending = false;
         if (this._dirtyCandles) { this._drawCandles(); this._dirtyCandles = false; }
         if (this._dirtyTicks) { this._drawTicks(); this._dirtyTicks = false; }
+        if (this._dirtyCvd) { this._drawCvd(); this._dirtyCvd = false; }
       });
     }
   }
@@ -45,6 +58,7 @@ export class ProChart {
       for (const [canvas, ctx, wKey, hKey] of [
         [this.candleCanvas, this.candleCtx, '_cw', '_ch'],
         [this.tickCanvas, this.tickCtx, '_tw', '_th'],
+        [this.cvdCanvas, this.cvdCtx, '_vw', '_vh'],
       ]) {
         if (!canvas?.parentElement) continue;
         const r = canvas.parentElement.getBoundingClientRect();
@@ -56,7 +70,7 @@ export class ProChart {
         this[hKey] = r.height;
       }
       const th = this._th;
-      if (th) {
+      if (th && this.tickCtx) {
         this._tickGrad = this.tickCtx.createLinearGradient(0, this.pad.top, 0, th - this.pad.bottom);
         this._tickGrad.addColorStop(0, 'hsla(192,95%,50%,0.25)');
         this._tickGrad.addColorStop(1, 'hsla(192,95%,50%,0.0)');
@@ -75,7 +89,49 @@ export class ProChart {
     this.ticks1s = [];
     this.liquidations = [];
     this.armedZone = null;
+
+    // Reset CVD baseline to $0 at the exact moment of click / symbol switch!
+    this.binanceCvd = 0.0;
+    this.bybitCvd = 0.0;
+    this.cvdPoints = [{ t: Date.now(), bin: 0.0, byb: 0.0 }];
+    if (this._cvdBinLegendEl) this._cvdBinLegendEl.textContent = 'BIN: $0';
+    if (this._cvdBybLegendEl) this._cvdBybLegendEl.textContent = 'BYB: $0';
+
     this._fetch();
+    this._requestRender(true, true, true);
+  }
+
+  onCvdUpdate(msg) {
+    if (msg.symbol !== this.symbol) return;
+    const now = msg.time ? Math.floor(msg.time * 1000) : Date.now();
+
+    this.binanceCvd += (msg.bin_delta || 0.0);
+    this.bybitCvd += (msg.byb_delta || 0.0);
+
+    this.cvdPoints.push({
+      t: now,
+      bin: this.binanceCvd,
+      byb: this.bybitCvd
+    });
+
+    // Keep last 180 seconds rolling window
+    const cutoff = now - 180_000;
+    const idx = this.cvdPoints.findIndex(p => p.t >= cutoff);
+    if (idx > 0) this.cvdPoints.splice(0, idx);
+
+    // Update legend
+    if (this._cvdBinLegendEl) {
+      const bSign = this.binanceCvd >= 0 ? '+' : '';
+      this._cvdBinLegendEl.textContent = `BIN: ${bSign}$${this._fmtUsd(this.binanceCvd)}`;
+      this._cvdBinLegendEl.style.color = this.binanceCvd >= 0 ? 'var(--binance-yellow)' : '#e74c6b';
+    }
+    if (this._cvdBybLegendEl) {
+      const ySign = this.bybitCvd >= 0 ? '+' : '';
+      this._cvdBybLegendEl.textContent = `BYB: ${ySign}$${this._fmtUsd(this.bybitCvd)}`;
+      this._cvdBybLegendEl.style.color = this.bybitCvd >= 0 ? 'var(--bybit-gold)' : '#e74c6b';
+    }
+
+    this._requestRender(false, false, true);
   }
 
   onTick(tick) {
@@ -348,6 +404,88 @@ export class ProChart {
       ctx.fillStyle = '#0a0e17'; ctx.font = 'bold 10px "JetBrains Mono",monospace'; ctx.textAlign = 'center';
       ctx.fillText(this._fmt(price), w - this.pad.right + 35, y + 3);
     }
+  }
+
+  /* ====================================================================
+     DUAL-EXCHANGE CVD FLOW (BINANCE vs BYBIT)
+     ==================================================================== */
+  _drawCvd() {
+    const ctx = this.cvdCtx, w = this._vw, h = this._vh;
+    if (!ctx || !w || !h) return;
+    ctx.clearRect(0, 0, w, h);
+
+    const pts = this.cvdPoints;
+    if (!pts || pts.length < 2) {
+      ctx.fillStyle = '#7a8ba6'; ctx.font = '12px "JetBrains Mono",monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${this.symbol} CVD 실시간 체결 데이터 수신 대기 중...`, w / 2, h / 2);
+      return;
+    }
+
+    const pW = w - this.pad.left - this.pad.right;
+    const pH = h - this.pad.top - this.pad.bottom;
+
+    let lo = 0, hi = 0;
+    for (const p of pts) {
+      if (p.bin < lo) lo = p.bin; if (p.bin > hi) hi = p.bin;
+      if (p.byb < lo) lo = p.byb; if (p.byb > hi) hi = p.byb;
+    }
+    if (lo > 0) lo = 0;
+    if (hi < 0) hi = 0;
+    const rng = (hi - lo) || 1000;
+    lo -= rng * 0.12; hi += rng * 0.12;
+
+    const yOf = v => this.pad.top + (1 - (v - lo) / (hi - lo)) * pH;
+    const firstT = pts[0].t, lastT = pts[pts.length - 1].t;
+    const tRange = (lastT - firstT) || 1;
+    const xOf = t => this.pad.left + ((t - firstT) / tRange) * pW;
+
+    // Grid
+    ctx.strokeStyle = 'hsl(222,25%,15%)'; ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+      const v = lo + (i / 4) * (hi - lo);
+      const y = yOf(v);
+      ctx.beginPath(); ctx.moveTo(this.pad.left, y); ctx.lineTo(w - this.pad.right, y); ctx.stroke();
+      ctx.fillStyle = '#6b7a8d'; ctx.font = '10px "JetBrains Mono",monospace'; ctx.textAlign = 'left';
+      ctx.fillText(this._fmtUsd(v), w - this.pad.right + 4, y + 3);
+    }
+
+    // Zero baseline ($0)
+    const yZero = yOf(0);
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    ctx.lineWidth = 1.2;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(this.pad.left, yZero); ctx.lineTo(w - this.pad.right, yZero); ctx.stroke();
+    ctx.restore();
+
+    // 1. Binance CVD Line (Bright Yellow)
+    ctx.beginPath();
+    ctx.moveTo(xOf(pts[0].t), yOf(pts[0].bin));
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(xOf(pts[i].t), yOf(pts[i].bin));
+    ctx.strokeStyle = '#f3ba2f'; ctx.lineWidth = 2.0; ctx.stroke();
+
+    // 2. Bybit CVD Line (Bybit Gold/Orange)
+    ctx.beginPath();
+    ctx.moveTo(xOf(pts[0].t), yOf(pts[0].byb));
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(xOf(pts[i].t), yOf(pts[i].byb));
+    ctx.strokeStyle = '#ff9800'; ctx.lineWidth = 2.0; ctx.stroke();
+
+    // Right-side endpoint badges
+    const lastPt = pts[pts.length - 1];
+    ctx.fillStyle = '#f3ba2f';
+    ctx.beginPath(); ctx.arc(w - this.pad.right - 4, yOf(lastPt.bin), 3.5, 0, Math.PI * 2); ctx.fill();
+
+    ctx.fillStyle = '#ff9800';
+    ctx.beginPath(); ctx.arc(w - this.pad.right - 4, yOf(lastPt.byb), 3.5, 0, Math.PI * 2); ctx.fill();
+  }
+
+  _fmtUsd(usd) {
+    const abs = Math.abs(usd);
+    const sign = usd < 0 ? '-' : '+';
+    if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2)}M`;
+    if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(1)}k`;
+    return `${sign}$${abs.toFixed(0)}`;
   }
 
   _fmt(p) {
