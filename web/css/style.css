@@ -191,26 +191,7 @@ html, body {
   gap: 10px;
 }
 
-.btn-autotrade {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  font-size: 12px;
-  font-weight: 700;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-strong);
-  background: var(--bg-surface-elevated);
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
 
-.btn-autotrade.active {
-  background: var(--warn-amber-bg);
-  border-color: var(--warn-amber);
-  color: var(--warn-amber);
-}
 
 .btn-emergency-close {
   padding: 6px 12px;
@@ -396,16 +377,24 @@ html, body {
   letter-spacing: -0.2px;
 }
 
-/* Cascade Burst Card (Cross-Exchange Linkage) */
-.cascade-card {
-  padding: 10px 12px;
-  background: linear-gradient(135deg, hsla(38, 92%, 52%, 0.15) 0%, var(--bg-surface-elevated) 100%);
-  border: 1px solid var(--warn-amber);
-  box-shadow: 0 0 14px hsla(38, 92%, 52%, 0.25);
-  border-radius: var(--radius-sm);
+/* Cascade Burst Card (Cross-Exchange Linkage) - 4줄 최적화 대형 카드 */
+.cascade-radar-panel {
+  flex: 0 0 auto;
+  max-height: 48%;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  overflow: hidden;
+}
+
+.cascade-card {
+  padding: 11px 14px;
+  background: linear-gradient(135deg, hsla(38, 92%, 52%, 0.18) 0%, var(--bg-surface-elevated) 100%);
+  border: 1.5px solid var(--warn-amber);
+  box-shadow: 0 0 16px hsla(38, 92%, 52%, 0.35);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
   position: relative;
   overflow: hidden;
   cursor: pointer;
@@ -414,12 +403,12 @@ html, body {
 }
 
 @keyframes pulse-cascade {
-  0% { box-shadow: 0 0 8px hsla(38, 92%, 52%, 0.2); }
-  100% { box-shadow: 0 0 18px hsla(38, 92%, 52%, 0.45); }
+  0% { box-shadow: 0 0 8px hsla(38, 92%, 52%, 0.25); border-color: rgba(245, 158, 11, 0.6); }
+  100% { box-shadow: 0 0 20px hsla(38, 92%, 52%, 0.55); border-color: rgba(245, 158, 11, 1); }
 }
 
 .cascade-card:hover {
-  filter: brightness(1.1);
+  filter: brightness(1.12);
   transform: translateY(-1px);
 }
 
@@ -430,12 +419,12 @@ html, body {
 }
 
 .cascade-badge {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   background: var(--warn-amber);
   color: #0a0e17;
-  padding: 2px 6px;
-  border-radius: 3px;
+  padding: 2px 7px;
+  border-radius: 4px;
   letter-spacing: 0.5px;
 }
 
@@ -443,13 +432,13 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 12px;
+  font-size: 12.5px;
   font-family: var(--font-mono);
   font-weight: 700;
 }
 
 .cascade-lag {
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--accent-cyan);
   font-weight: 700;
 }
@@ -457,18 +446,26 @@ html, body {
 .cascade-actions {
   display: flex;
   gap: 6px;
-  margin-top: 2px;
+  margin-top: 4px;
 }
 
 .btn-cascade-exec {
   flex: 1;
-  padding: 5px;
-  font-size: 11px;
+  padding: 7px 10px;
+  font-size: 12px;
   font-weight: 800;
-  border-radius: 3px;
+  border-radius: 4px;
   border: none;
   cursor: pointer;
   text-align: center;
+  letter-spacing: 0.3px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  transition: all 0.15s ease;
+}
+
+.btn-cascade-exec:hover {
+  filter: brightness(1.15);
+  transform: scale(1.02);
 }
 
 .btn-cascade-exec.short { background: var(--short-red); color: white; }

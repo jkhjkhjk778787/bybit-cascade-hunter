@@ -2,10 +2,10 @@
  * Master Application Controller & WebSocket Connection Manager
  */
 
-import { ProChart } from './chart.js?v=20260817_0511';
-import { RadarComponent } from './radar.js?v=20260817_0511';
-import { TerminalComponent } from './terminal.js?v=20260817_0511';
-import { OrderflowComponent } from './orderflow.js?v=20260817_0511';
+import { ProChart } from './chart.js?v=20260817_0513';
+import { RadarComponent } from './radar.js?v=20260817_0513';
+import { TerminalComponent } from './terminal.js?v=20260817_0513';
+import { OrderflowComponent } from './orderflow.js?v=20260817_0513';
 
 class CascadeTradingApp {
   constructor() {
@@ -49,33 +49,6 @@ class CascadeTradingApp {
         Object.assign(this.terminal.symbolMaxLeverages, data.max_leverages);
         this.terminal.setSymbol(this.currentSymbol);
       }
-
-      // Update Auto-Trade Button State
-      const btnAuto = document.getElementById('btnAutoTrade');
-      if (data.auto_trade_enabled) {
-        btnAuto.classList.add('active');
-        btnAuto.innerHTML = '🤖 AUTO-TRADE: <b>ACTIVE</b>';
-      } else {
-        btnAuto.classList.remove('active');
-        btnAuto.innerHTML = '🤖 AUTO-TRADE: <b>OFF (MANUAL)</b>';
-      }
-
-      btnAuto.addEventListener('click', async () => {
-        const toggleRes = await fetch('/api/autotrade/toggle', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({})
-        });
-        const toggleData = await toggleRes.json();
-        if (toggleData.auto_trade_enabled) {
-          btnAuto.classList.add('active');
-          btnAuto.innerHTML = '🤖 AUTO-TRADE: <b>ACTIVE</b>';
-        } else {
-          btnAuto.classList.remove('active');
-          btnAuto.innerHTML = '🤖 AUTO-TRADE: <b>OFF (MANUAL)</b>';
-        }
-      });
-
     } catch (e) {
       console.error('Initial state fetch error:', e);
     }

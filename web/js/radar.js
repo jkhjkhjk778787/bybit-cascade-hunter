@@ -41,10 +41,6 @@ export class RadarComponent {
         if (remaining <= 0) {
           card.remove();
           this.cascadeCards.delete(sym);
-          const placeholder = document.getElementById('cascadePlaceholder');
-          if (placeholder && this.cascadeCards.size === 0) {
-            placeholder.style.display = 'block';
-          }
         } else {
           const fill = card._fillEl;
           const timeText = card._timeTextEl;
@@ -58,8 +54,6 @@ export class RadarComponent {
 
   addCascadeBurst(cascade) {
     if (!this.cascadeListEl) return;
-    const placeholder = document.getElementById('cascadePlaceholder');
-    if (placeholder) placeholder.style.display = 'none';
 
     const sym = cascade.symbol;
     const isLong = cascade.is_long_liq;
@@ -74,29 +68,29 @@ export class RadarComponent {
       card.dataset.symbol = sym;
       card.innerHTML = `
         <div class="cascade-top">
-          <div style="display:flex; align-items:center; gap:6px;">
-            <span style="font-size:14px; font-weight:800; font-family:var(--font-mono); color:var(--text-primary);">${sym}</span>
-            <span class="cascade-badge">💥 CASCADE LINKED</span>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:15px; font-weight:900; font-family:var(--font-mono); color:var(--text-primary); letter-spacing:-0.3px;">${sym}</span>
+            <span class="cascade-badge">💥 CASCADE</span>
           </div>
-          <span class="cascade-time" style="font-size:11px; font-weight:700; color:var(--warn-amber);">15.0s</span>
+          <span class="cascade-time" style="font-size:12px; font-weight:800; color:var(--warn-amber); font-family:var(--font-mono);">15.0s</span>
         </div>
 
-        <div style="font-size:11px; font-weight:700; color:${isLong ? 'var(--short-red)' : 'var(--long-green)'};">
+        <div style="font-size:12px; font-weight:800; color:${isLong ? 'var(--short-red)' : 'var(--long-green)'}; letter-spacing:-0.2px;">
           ${targetAction}
         </div>
 
         <div class="cascade-flow">
-          <span>🟡 Binance: $${Math.round(cascade.binance_usd).toLocaleString()}</span>
-          <span style="color:var(--warn-amber);">➔</span>
-          <span>🟠 Bybit: $${Math.round(cascade.bybit_usd).toLocaleString()}</span>
+          <span style="color:var(--binance-yellow);">🟡 Binance: $${Math.round(cascade.binance_usd).toLocaleString()}</span>
+          <span style="color:var(--warn-amber); font-size:14px;">➔</span>
+          <span style="color:var(--bybit-gold);">🟠 Bybit: $${Math.round(cascade.bybit_usd).toLocaleString()}</span>
         </div>
 
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <span class="cascade-lag">⚡ Bybit 전이 지연: +${cascade.lag_sec}s</span>
+        <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; color:var(--text-muted);">
+          <span class="cascade-lag">⚡ 전이 지연: <b>+${cascade.lag_sec}s</b></span>
         </div>
 
-        <div class="progress-bar-container" style="height:3px; background:rgba(255,255,255,0.1);">
-          <div class="progress-bar-fill" style="background:var(--warn-amber);"></div>
+        <div class="progress-bar-container" style="height:4px; background:rgba(255,255,255,0.08); border-radius:2px; overflow:hidden;">
+          <div class="progress-bar-fill" style="background:var(--warn-amber); height:100%;"></div>
         </div>
 
         <div class="cascade-actions">
