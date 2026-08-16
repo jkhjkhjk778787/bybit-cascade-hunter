@@ -124,11 +124,19 @@ class BybitTradingService:
                         sym = item.get("symbol")
                         lsf = item.get("lotSizeFilter", {})
                         pf = item.get("priceFilter", {})
+                        step_str = lsf.get("qtyStep", "0.001")
+                        min_q_str = lsf.get("minOrderQty", "0.001")
+                        tick_str = pf.get("tickSize", "0.0001")
+                        min_notional = _safe_float(lsf.get("minNotionalValue"), 5.0)
+
                         self.symbol_specs[sym] = {
-                            "min_qty": _safe_float(lsf.get("minOrderQty"), 0.001),
-                            "qty_step": _safe_float(lsf.get("qtyStep"), 0.001),
-                            "min_notional": _safe_float(lsf.get("minNotionalValue"), 5.0),
-                            "tick_size": _safe_float(pf.get("tickSize"), 0.0001),
+                            "min_qty": _safe_float(min_q_str, 0.001),
+                            "qty_step": _safe_float(step_str, 0.001),
+                            "min_qty_str": min_q_str,
+                            "qty_step_str": step_str,
+                            "tick_size_str": tick_str,
+                            "min_notional": min_notional,
+                            "tick_size": _safe_float(tick_str, 0.0001),
                         }
                         count += 1
                     cursor = data.get("result", {}).get("nextPageCursor", "")
@@ -151,17 +159,27 @@ class BybitTradingService:
                     it = items[0]
                     lsf = it.get("lotSizeFilter", {})
                     pf = it.get("priceFilter", {})
+                    step_str = lsf.get("qtyStep", "0.001")
+                    min_q_str = lsf.get("minOrderQty", "0.001")
+                    tick_str = pf.get("tickSize", "0.0001")
+                    min_notional = _safe_float(lsf.get("minNotionalValue"), 5.0)
                     spec = {
-                        "min_qty": _safe_float(lsf.get("minOrderQty"), 0.001),
-                        "qty_step": _safe_float(lsf.get("qtyStep"), 0.001),
-                        "min_notional": _safe_float(lsf.get("minNotionalValue"), 5.0),
-                        "tick_size": _safe_float(pf.get("tickSize"), 0.0001),
+                        "min_qty": _safe_float(min_q_str, 0.001),
+                        "qty_step": _safe_float(step_str, 0.001),
+                        "min_qty_str": min_q_str,
+                        "qty_step_str": step_str,
+                        "tick_size_str": tick_str,
+                        "min_notional": min_notional,
+                        "tick_size": _safe_float(tick_str, 0.0001),
                     }
                     self.symbol_specs[symbol] = spec
                     return spec
         except Exception:
             pass
-        return {"min_qty": 0.001, "qty_step": 0.001, "min_notional": 5.0, "tick_size": 0.0001}
+        return {
+            "min_qty": 0.001, "qty_step": 0.001, "min_qty_str": "0.001",
+            "qty_step_str": "0.001", "tick_size_str": "0.0001", "min_notional": 5.0, "tick_size": 0.0001
+        }
 
     def get_wallet_balance(self) -> Dict[str, Any]:
         res = self._request("GET", "/v5/account/wallet-balance", {"accountType": "UNIFIED"})
@@ -217,42 +235,59 @@ class BybitTradingService:
         if last_price <= 0:
             return {"retCode": -1, "retMsg": "Invalid price"}
 
+        step_str = str(spec.get("qty_step_str", "0.001"))
+        min_q_str = str(spec.get("min_qty_str", "0.001"))
+        tick_str = str(spec.get("tick_size_str", "0.0001"))
         min_notional = float(spec.get("min_notional", 5.0))
         min_qty = float(spec.get("min_qty", 0.001))
-        qty_step = float(spec.get("qty_step", 0.001))
 
         # 목표 노셔널 (Margin * Leverage) 계산 및 거래소 최소 주문 금액($5.0) 보장
         target_notional = order_value_usdt * leverage
         effective_notional = max(target_notional, min_notional, (min_qty * last_price))
 
         raw_qty = effective_notional / last_price
-        
-        step_dec = max(0, -Decimal(str(qty_step)).as_tuple().exponent)
-        step_val = Decimal(str(qty_step))
-        min_qty_val = Decimal(str(min_qty))
 
-        # 올림(ROUND_UP)을 적용하여 최소 수량/최소 노셔널 미달로 인한 거절 방지
-        qty_d = Decimal(str(raw_qty)).quantize(step_val, rounding=ROUND_UP)
-        if qty_d < min_qty_val:
-            qty_d = min_qty_val
+        # Decimal 정밀 스텝 연산
+        step_d = Decimal(step_str)
+        min_q_d = Decimal(min_q_str)
+        raw_d = Decimal(str(raw_qty))
 
-        # 거래대금이 min_notional($5.0) 미만일 경우 스텝 단위로 올려줌
+        steps = (raw_d / step_d).quantize(Decimal('1'), rounding=ROUND_UP)
+        qty_d = steps * step_d
+        if qty_d < min_q_d:
+            qty_d = min_q_d
+
         while (float(qty_d) * last_price) < min_notional:
-            qty_d += step_val
+            qty_d += step_d
 
-        qty_str = f"{qty_d:.{step_dec}f}"
-
-        tick_size = float(spec.get("tick_size", 0.0001))
-        tick_dec = max(0, -Decimal(str(tick_size)).as_tuple().exponent)
-        if side == "Buy":
-            tp_p = last_price * (1 + tp_pct / 100.0)
-            sl_p = last_price * (1 - sl_pct / 100.0)
+        # 정수(e.g. 1)면 "3111", 소수(e.g. 0.001)면 "0.001"로 완벽 포맷
+        if '.' in step_str:
+            dec_places = len(step_str.split('.')[1])
+            qty_str = f"{qty_d:.{dec_places}f}"
         else:
-            tp_p = last_price * (1 - tp_pct / 100.0)
-            sl_p = last_price * (1 + sl_pct / 100.0)
+            qty_str = str(int(qty_d))
 
-        tp_str = f"{tp_p:.{tick_dec}f}"
-        sl_str = f"{sl_p:.{tick_dec}f}"
+        # TP / SL 가격 포맷팅
+        tick_d = Decimal(tick_str)
+        if side == "Buy":
+            raw_tp = Decimal(str(last_price)) * Decimal(str(1 + tp_pct / 100.0))
+            raw_sl = Decimal(str(last_price)) * Decimal(str(1 - sl_pct / 100.0))
+        else:
+            raw_tp = Decimal(str(last_price)) * Decimal(str(1 - tp_pct / 100.0))
+            raw_sl = Decimal(str(last_price)) * Decimal(str(1 + sl_pct / 100.0))
+
+        tp_ticks = (raw_tp / tick_d).quantize(Decimal('1'), rounding=ROUND_HALF_UP)
+        sl_ticks = (raw_sl / tick_d).quantize(Decimal('1'), rounding=ROUND_HALF_UP)
+        tp_d = tp_ticks * tick_d
+        sl_d = sl_ticks * tick_d
+
+        if '.' in tick_str:
+            tick_places = len(tick_str.split('.')[1])
+            tp_str = f"{tp_d:.{tick_places}f}"
+            sl_str = f"{sl_d:.{tick_places}f}"
+        else:
+            tp_str = str(int(tp_d))
+            sl_str = str(int(sl_d))
 
         order_params = {
             "category": "linear",
