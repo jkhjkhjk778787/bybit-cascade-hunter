@@ -284,6 +284,7 @@ class CascadeTradingServer:
         self.ticker_ws = None
         self._cvd_deltas: Dict[str, Dict[str, float]] = {}
         self.position_entry_times: Dict[str, float] = {}
+        self.cascade_cooldowns: Dict[str, float] = {}
         # 초기 기본 20개 동시 상장 심볼
         self.top20_symbols: List[str] = [
             "BTCUSDT", "ETHUSDT", "SOLUSDT", "COWUSDT", "CYSUSDT",
@@ -311,6 +312,7 @@ class CascadeTradingServer:
             self._cvd_deltas.pop(s, None)
             self.recent_liquidations_by_sym.pop(s, None)
             self.latest_prices.pop(s, None)
+            self.cascade_cooldowns.pop(s, None)
 
         if self.ticker_ws and not self.ticker_ws.closed:
             if dropped:
@@ -611,24 +613,31 @@ class CascadeTradingServer:
                         elif event.exchange == "bybit":
                             bin_liq = binance_recent_liqs.get(sym)
                             if bin_liq and (now - bin_liq["ts"] <= 8.0) and (bin_liq["is_long"] == event.is_long_liquidation):
-                                is_cascade = True
-                                lag_sec = round(now - bin_liq["ts"], 2)
-                                target_side = "Sell" if event.is_long_liquidation else "Buy"
-                                cascade_data = {
-                                    "symbol": sym,
-                                    "is_long_liq": event.is_long_liquidation,
-                                    "target_side": target_side,
-                                    "binance_usd": bin_liq["usd"],
-                                    "bybit_usd": event.notional_usd,
-                                    "lag_sec": lag_sec,
-                                    "timestamp": int(now * 1000)
-                                }
+                                # 25초 쿨타임 검사: 동일 심볼 다수 청산 시 중복 트리거 스팸 차단
+                                if now >= self.cascade_cooldowns.get(sym, 0.0):
+                                    is_cascade = True
+                                    self.cascade_cooldowns[sym] = now + 25.0  # 25초 쿨타임 부여
+                                    lag_sec = round(now - bin_liq["ts"], 2)
+                                    target_side = "Sell" if event.is_long_liquidation else "Buy"
+                                    cascade_data = {
+                                        "symbol": sym,
+                                        "is_long_liq": event.is_long_liquidation,
+                                        "target_side": target_side,
+                                        "binance_usd": bin_liq["usd"],
+                                        "bybit_usd": event.notional_usd,
+                                        "lag_sec": lag_sec,
+                                        "timestamp": int(now * 1000)
+                                    }
 
-                                logger.info(f"💥 [연쇄 청산 포착!] {sym} (Binance ${bin_liq['usd']:,.0f} ➔ Bybit ${event.notional_usd:,.0f} | {lag_sec}s 전이)")
-                                await self.broadcast({
-                                    "type": "CASCADE_BURST",
-                                    "cascade": cascade_data
-                                })
+                                    # 도화선 1회성 소비 (One-shot)
+                                    binance_recent_liqs.pop(sym, None)
+                                    self.armed_status.pop(sym, None)
+
+                                    logger.info(f"💥 [연쇄 청산 격발!] {sym} (Binance ${bin_liq['usd']:,.0f} ➔ Bybit ${event.notional_usd:,.0f} | {lag_sec}s 전이) [25s 쿨타임 적용]")
+                                    await self.broadcast({
+                                        "type": "CASCADE_BURST",
+                                        "cascade": cascade_data
+                                    })
 
                         if len(binance_recent_liqs) > 200:
                             binance_recent_liqs = {k: v for k, v in binance_recent_liqs.items() if now - v['ts'] <= 10.0}

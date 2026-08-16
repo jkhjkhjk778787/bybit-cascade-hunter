@@ -14,6 +14,7 @@ class CascadeTradingApp {
     this.latestPrices = {};
     this.armedSymbols = {};
     this.openPositions = [];
+    this.lastTriggerTimeBySym = {};
     this.ws = null;
     this.reconnectTimer = null;
 
@@ -153,11 +154,17 @@ class CascadeTradingApp {
       case 'CASCADE_BURST':
         this.radar.addCascadeBurst(msg.cascade);
         if (msg.cascade?.symbol) {
-          if (this.hasOpenPosition()) {
-            this.terminal.showToast(`💥 [연쇄 트리거] ${msg.cascade.symbol} 포착 (보유 포지션 보호로 화면 유지)`, 'info');
-          } else {
-            this.selectSymbol(msg.cascade.symbol);
-            this.terminal.showToast(`🚨 [트리거 발동] ${msg.cascade.symbol} 차트로 즉시 자동 전환!`, 'warn');
+          const sym = msg.cascade.symbol;
+          const now = Date.now();
+          const lastT = this.lastTriggerTimeBySym[sym] || 0;
+          if (now - lastT >= 25_000) {
+            this.lastTriggerTimeBySym[sym] = now;
+            if (this.hasOpenPosition()) {
+              this.terminal.showToast(`💥 [연쇄 트리거] ${sym} 포착 (보유 포지션 보호로 화면 유지)`, 'info');
+            } else {
+              this.selectSymbol(sym);
+              this.terminal.showToast(`🚨 [트리거 발동] ${sym} 차트로 즉시 자동 전환!`, 'warn');
+            }
           }
         }
         break;
@@ -173,9 +180,15 @@ class CascadeTradingApp {
           }
         }
         if (msg.event?.is_cascade && msg.event.symbol && msg.event.symbol !== this.currentSymbol) {
-          if (!this.hasOpenPosition()) {
-            this.selectSymbol(msg.event.symbol);
-            this.terminal.showToast(`⚡ [연쇄 청산] ${msg.event.symbol} 차트로 자동 전환!`, 'warn');
+          const sym = msg.event.symbol;
+          const now = Date.now();
+          const lastT = this.lastTriggerTimeBySym[sym] || 0;
+          if (now - lastT >= 25_000) {
+            this.lastTriggerTimeBySym[sym] = now;
+            if (!this.hasOpenPosition()) {
+              this.selectSymbol(sym);
+              this.terminal.showToast(`⚡ [연쇄 청산] ${sym} 차트로 자동 전환!`, 'warn');
+            }
           }
         }
         break;
