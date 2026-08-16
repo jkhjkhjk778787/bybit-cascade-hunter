@@ -32,6 +32,7 @@ from typing import Dict, Any, Optional
 
 import websockets
 from dotenv import load_dotenv
+from crypto_liquidation import LiquidationStream, LiquidationEvent, OrderSide, PositionSide
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
@@ -337,49 +338,54 @@ class DualExchangeCascadeHunter:
                 self.active_symbol = None
                 self.active_side = None
 
-    async def binance_precursor_listener(self):
-        """바이낸스 실시간 청산 스트림 감시 ➔ 도화선 장전(Arming)"""
+    async def unified_liquidation_listener(self):
+        """사용자님의 crypto-liquidation-stream 라이브러리를 통한 Binance & Bybit 실시간 청산 통합 감시"""
         while self.is_running:
             try:
-                async with websockets.connect(BINANCE_WS_URL, ping_interval=20, ping_timeout=10) as ws:
-                    logger.info("🟡 [Binance WS] 청산 도화선 감시망 연결 성공!")
-                    async for message in ws:
-                        if not self.is_running: break
-                        data = orjson.loads(message)
-                        event = data.get("o", {})
-                        sym = event.get("s", "")
-                        side = event.get("S", "")  # "SELL" (Long Liq)
-                        price = float(event.get("p", 0.0))
-                        qty = float(event.get("q", 0.0))
-                        liq_usd = price * qty
+                async with LiquidationStream(exchanges=["binance", "bybit"], min_notional_usd=0.0) as stream:
+                    logger.info("🟡 [crypto_liquidation] Binance & Bybit 듀얼 청산 감시망 연결 성공!")
+                    async for event in stream:
+                        if not self.is_running:
+                            break
+                        sym = event.symbol
+                        if sym not in self.symbol_configs:
+                            continue
 
-                        if sym in self.symbol_configs:
-                            cfg = self.symbol_configs.get(sym, {})
+                        cfg = self.symbol_configs.get(sym, {})
+                        now = time.time()
+
+                        # 1. Binance 청산 -> 1단계 장전(Armed)
+                        if event.exchange == "binance":
                             arm_threshold = cfg.get("bin_arm_usd", 300.0)
                             arm_duration = cfg.get("arm_sec", 8.0)
 
-                            if liq_usd >= arm_threshold:
-                                now = time.time()
-                                if side == "SELL":
-                                    # 롱 청산 ➔ 숏 진입 장전
+                            if event.notional_usd >= arm_threshold:
+                                if event.is_long_liquidation:
                                     self.binance_armed[sym] = {"target_side": "Sell", "expires": now + arm_duration}
-                                    logger.info(f"🟡 [Binance 롱 청산 도화선!] {sym} 롱 청산 ${liq_usd:,.0f} USD ➔ Bybit 숏 장전 ({arm_duration}초 유효)")
-                                elif side == "BUY":
-                                    # 숏 청산 ➔ 롱 진입 장전
+                                    logger.info(f"🟡 [Binance 롱 청산 도화선!] {sym} 롱 청산 ${event.notional_usd:,.0f} USD ➔ Bybit 숏 장전 ({arm_duration}초 유효)")
+                                elif event.is_short_liquidation:
                                     self.binance_armed[sym] = {"target_side": "Buy", "expires": now + arm_duration}
-                                    logger.info(f"🟢 [Binance 숏 청산 도화선!] {sym} 숏 청산 ${liq_usd:,.0f} USD ➔ Bybit 롱 장전 ({arm_duration}초 유효)")
+                                    logger.info(f"🟢 [Binance 숏 청산 도화선!] {sym} 숏 청산 ${event.notional_usd:,.0f} USD ➔ Bybit 롱 장전 ({arm_duration}초 유효)")
+
+                        # 2. Bybit 청산 -> 2단계 확증 즉시 검사
+                        elif event.exchange == "bybit":
+                            liq_side = "Sell" if event.is_long_liquidation else "Buy"
+                            if sym not in self.bybit_liq_buffers:
+                                self.bybit_liq_buffers[sym] = deque(maxlen=300)
+                            self.bybit_liq_buffers[sym].append((now, event.notional_usd, event.price, liq_side))
+                            self.last_liq_event_time = now
+                            await self.check_bybit_confirmation(sym, event.price, now, event_type="LIQ", liq_usd=event.notional_usd, liq_side=liq_side)
 
             except Exception as e:
-                logger.error(f"Binance WS 에러: {e} ➔ 3초 후 재연결...")
+                logger.error(f"[crypto_liquidation 에러] {e} ➔ 3초 후 재연결...")
                 await asyncio.sleep(3)
 
-    async def bybit_market_listener(self):
-        """바이비트 실시간 틱/청산 감시 ➔ 2단계 확증 즉시 양방향 격발!"""
+    async def bybit_ticker_listener(self):
+        """바이비트 실시간 호가/체결가 감시 ➔ 가격 변동률 확증 및 트레일링 스탑"""
         while self.is_running:
             try:
                 # 재연결 시 과거 가격 버퍼를 클리어하여 단절 전후 갭으로 인한 오신호 방지
                 self.bybit_price_buffers.clear()
-                self.bybit_liq_buffers.clear()
 
                 async with websockets.connect(BYBIT_WS_URL, ping_interval=20, ping_timeout=10) as ws:
                     self.bybit_ws_conn = ws
@@ -421,41 +427,16 @@ class DualExchangeCascadeHunter:
 
                                     # 가격 변동 확증 검사
                                     await self.check_bybit_confirmation(sym, p_float, now, event_type="TICK")
-
-                            elif topic.startswith("allLiquidation.") or topic.startswith("liquidation."):
-                                sym = topic.replace("allLiquidation.", "").replace("liquidation.", "")
-                                raw_data = data.get("data", [])
-                                data_list = [raw_data] if isinstance(raw_data, dict) else raw_data
-
-                                for l_data in data_list:
-                                    side = l_data.get("side") or l_data.get("S")
-                                    price = float(l_data.get("price") or l_data.get("p") or 0.0)
-                                    size = float(l_data.get("size") or l_data.get("v") or 0.0)
-                                    liq_usd = price * size
-                                    now = time.time()
-
-                                    # Bybit v5: 'Buy' indicates bankrupt Long position (forced sell) -> 숏 진입 기회
-                                    #           'Sell' indicates bankrupt Short position (forced buy) -> 롱 진입 기회
-                                    is_long_liq = (side == "Buy")
-                                    liq_side = "Sell" if is_long_liq else "Buy"
-
-                                    if sym in self.symbol_configs:
-                                        if sym not in self.bybit_liq_buffers:
-                                            self.bybit_liq_buffers[sym] = deque(maxlen=300)
-                                        self.bybit_liq_buffers[sym].append((now, liq_usd, price, liq_side))
-                                        self.last_liq_event_time = now
-                                        # Bybit 소액 청산 확증 검사
-                                        await self.check_bybit_confirmation(sym, price, now, event_type="LIQ", liq_usd=liq_usd, liq_side=liq_side)
                     finally:
                         ping_task.cancel()
 
             except Exception as e:
-                logger.error(f"Bybit WS 에러: {e} ➔ 2초 후 재연결...")
+                logger.error(f"Bybit Ticker WS 에러: {e} ➔ 2초 후 재연결...")
                 await asyncio.sleep(2)
 
     async def sync_bybit_subscriptions(self):
         if not self.bybit_ws_conn: return
-        target = set([f"allLiquidation.{s}" for s in self.monitored_symbols] + [f"tickers.{s}" for s in self.monitored_symbols])
+        target = set([f"tickers.{s}" for s in self.monitored_symbols])
         to_sub = list(target - self.bybit_subscribed_topics)
         to_unsub = list(self.bybit_subscribed_topics - target)
 
@@ -468,7 +449,16 @@ class DualExchangeCascadeHunter:
                     if i + chunk_size < len(to_sub):
                         await asyncio.sleep(0.05)
                 self.bybit_subscribed_topics.update(to_sub)
-                logger.info(f"📡 [Bybit WS 구독] {len(to_sub)}개 토픽 추가 ({len(self.monitored_symbols)}개 심볼)")
+                logger.info(f"📡 [Bybit Ticker 구독] {len(to_sub)}개 토픽 추가 ({len(self.monitored_symbols)}개 심볼)")
+
+            if to_unsub:
+                chunk_size = 10
+                for i in range(0, len(to_unsub), chunk_size):
+                    chunk = to_unsub[i:i + chunk_size]
+                    await self.bybit_ws_conn.send(json.dumps({"op": "unsubscribe", "args": chunk}))
+                    if i + chunk_size < len(to_unsub):
+                        await asyncio.sleep(0.05)
+                self.bybit_subscribed_topics.difference_update(to_unsub)
 
             if to_unsub:
                 chunk_size = 10
@@ -787,8 +777,8 @@ class DualExchangeCascadeHunter:
     async def run(self):
         await self.initialize()
         await asyncio.gather(
-            self.binance_precursor_listener(),
-            self.bybit_market_listener(),
+            self.unified_liquidation_listener(),
+            self.bybit_ticker_listener(),
             self.position_guard_loop(),
             self.hot_reload_loop()
         )
