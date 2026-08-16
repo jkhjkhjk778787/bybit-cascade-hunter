@@ -568,15 +568,43 @@ html, body {
   color: var(--long-green);
 }
 
-.chart-canvas-wrapper {
+.dual-chart-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background-color: var(--border-subtle);
+  overflow: hidden;
+  height: calc(100% - 48px);
+}
+
+.chart-subpane {
   flex: 1;
   position: relative;
   width: 100%;
-  height: 100%;
+  height: 50%;
   background: radial-gradient(circle at 50% 50%, hsl(222, 45%, 8%) 0%, var(--bg-app) 100%);
+  overflow: hidden;
 }
 
-#proChartCanvas {
+.subpane-label {
+  position: absolute;
+  top: 8px;
+  left: 12px;
+  font-size: 10px;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  background: var(--bg-surface-elevated);
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  z-index: 10;
+  pointer-events: none;
+  letter-spacing: 0.5px;
+}
+
+#candle1mCanvas, #tick1sCanvas {
   width: 100%;
   height: 100%;
   display: block;

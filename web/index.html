@@ -96,22 +96,32 @@
         </section>
       </aside>
 
-      <!-- CENTER PANE: REAL-TIME PRO CHART -->
+      <!-- CENTER PANE: DUAL SPLIT PRO CHARTS (1M CANDLES / 1S TICKS) -->
       <section class="center-pane">
         <div class="chart-header">
           <div class="chart-sym-info">
             <span class="current-sym-name" id="currentSymName">VELVETUSDT</span>
             <span class="current-sym-price" id="currentSymPrice">$1.0850</span>
-            <span style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">PERP (USDT)</span>
+            <span style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">DUAL VIEW (1M / 1S)</span>
           </div>
-          <div style="display:flex; gap:8px; font-size:11px; color:var(--text-secondary);">
-            <span>🔴 롱 청산 점</span>
-            <span>🟢 숏 청산 점</span>
-            <span>⚡ 장전 배경</span>
+          <div style="display:flex; gap:10px; font-size:11px; color:var(--text-secondary);">
+            <span>📊 1분봉</span>
+            <span>⚡ 1초 틱</span>
+            <span>🔴 롱 청산</span>
+            <span>🟢 숏 청산</span>
           </div>
         </div>
-        <div class="chart-canvas-wrapper">
-          <canvas id="proChartCanvas"></canvas>
+        <div class="dual-chart-container">
+          <!-- Top Subpane: 1-Minute Candlestick Chart -->
+          <div class="chart-subpane">
+            <div class="subpane-label">📊 1-MIN CANDLESTICK (1분봉)</div>
+            <canvas id="candle1mCanvas"></canvas>
+          </div>
+          <!-- Bottom Subpane: 1-Second Real-Time High-Frequency Tick Chart -->
+          <div class="chart-subpane">
+            <div class="subpane-label">⚡ 1-SEC REAL-TIME TICK FLOW (1초 정밀 틱)</div>
+            <canvas id="tick1sCanvas"></canvas>
+          </div>
         </div>
       </section>
 

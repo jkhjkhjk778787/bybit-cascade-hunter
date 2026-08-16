@@ -18,7 +18,7 @@ class CascadeTradingApp {
     this.reconnectTimer = null;
 
     // Components
-    this.chart = new ProChart('proChartCanvas');
+    this.chart = new ProChart('candle1mCanvas', 'tick1sCanvas');
     this.radar = new RadarComponent('cascadeList', 'binanceFeedList', 'bybitFeedList');
     this.terminal = new TerminalComponent(this);
     this.orderflow = new OrderflowComponent('alertFeed');
