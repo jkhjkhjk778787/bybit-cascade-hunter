@@ -1,27 +1,41 @@
 /**
- * Cascade Pro Dual-Chart Engine
- * [Top] 1-Minute Candlestick from Bybit Kline API (pre-built OHLCV)
- * [Bot] 1-Second Real-Time Tick Flow from WebSocket stream
- * Liquidation overlay on both panes
+ * Cascade Pro Tri-Split Chart Engine
+ * [Top] Real-Time & Historical Liquidation Distribution (Auto-detecting Timeframe)
+ * [Mid] 1-Second Real-Time Tick Flow & Liquidation Burst Bubbles
+ * [Bot] Dual-Exchange Cumulative Volume Delta (CVD Flow)
  */
 
 export class ProChart {
-  constructor(candleCanvasId, tickCanvasId, cvdCanvasId) {
-    this.candleCanvas = document.getElementById(candleCanvasId);
-    this.candleCtx = this.candleCanvas?.getContext('2d');
+  constructor(liqCanvasId = 'centerLiqCanvas', tickCanvasId = 'tick1sCanvas', cvdCanvasId = 'cvdCanvas') {
+    this.liqCanvas = document.getElementById(liqCanvasId);
+    this.liqCtx = this.liqCanvas?.getContext('2d');
     this.tickCanvas = document.getElementById(tickCanvasId);
     this.tickCtx = this.tickCanvas?.getContext('2d');
     this.cvdCanvas = document.getElementById(cvdCanvasId);
     this.cvdCtx = this.cvdCanvas?.getContext('2d');
 
     this.symbol = 'VELVETUSDT';
-    this.candles1m = [];       // pre-built {t,o,h,l,c,v} from Bybit Kline
     this.ticks1s = [];         // live ticks {t,p} from WS, rolling 120s window
     this.liquidations = [];    // {t,p,isLong,usd,exch}
     this.latestPrice = 0;
     this.armedZone = null;
 
-    // Cumulative Volume Delta (CVD) starting from page click
+    // Liquidation Distribution State & Auto-Timeframe
+    this.isAutoTimeframe = true;
+    this.selectedTimeframe = '5m';
+    this.effectiveTimeframe = '5m';
+    this.liqTimeSeries = [];
+    this.liqSummary = { total_usd: 0, long_usd: 0, short_usd: 0, count: 0 };
+    this.liqBarCoords = [];
+    this.liqHoverIndex = -1;
+
+    // UI Elements
+    this._autoTfBadgeEl = document.getElementById('centerAutoTfBadge');
+    this._longLiqSumEl = document.getElementById('centerLongLiqSum');
+    this._shortLiqSumEl = document.getElementById('centerShortLiqSum');
+    this._tooltipEl = document.getElementById('centerLiqTooltip');
+
+    // Cumulative Volume Delta (CVD)
     this.binanceCvd = 0.0;
     this.bybitCvd = 0.0;
     this.cvdPoints = []; // [{t, bin, byb}]
@@ -29,23 +43,101 @@ export class ProChart {
     this._cvdBinLegendEl = document.getElementById('cvdBinLegend');
     this._cvdBybLegendEl = document.getElementById('cvdBybLegend');
 
-    this.pad = { top: 30, right: 72, bottom: 20, left: 8 };
+    this.pad = { top: 25, right: 72, bottom: 20, left: 10 };
     this._rafPending = false;
-    this._dirtyCandles = false;
+    this._dirtyLiq = false;
     this._dirtyTicks = false;
     this._dirtyCvd = false;
+
+    this._bindTimeframeButtons();
+    this._bindTooltipEvents();
     this._initResize();
   }
 
-  _requestRender(candles = true, ticks = true, cvd = true) {
-    if (candles) this._dirtyCandles = true;
+  _bindTimeframeButtons() {
+    const tfSelector = document.getElementById('centerLiqTfSelector');
+    if (!tfSelector) return;
+
+    tfSelector.querySelectorAll('.btn-timerate').forEach(btn => {
+      btn.addEventListener('click', () => {
+        tfSelector.querySelectorAll('.btn-timerate').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        const tf = btn.dataset.tf;
+        if (tf === 'auto') {
+          this.isAutoTimeframe = true;
+        } else {
+          this.isAutoTimeframe = false;
+          this.selectedTimeframe = tf;
+          this.effectiveTimeframe = tf;
+          if (this._autoTfBadgeEl) {
+            this._autoTfBadgeEl.textContent = `MANUAL: ${tf.toUpperCase()}`;
+            this._autoTfBadgeEl.style.borderColor = 'var(--text-muted)';
+            this._autoTfBadgeEl.style.color = 'var(--text-secondary)';
+          }
+        }
+        this._fetchLiquidationDistribution();
+      });
+    });
+  }
+
+  _bindTooltipEvents() {
+    if (!this.liqCanvas) return;
+    this.liqCanvas.addEventListener('mousemove', (e) => this._handleLiqHover(e));
+    this.liqCanvas.addEventListener('mouseleave', () => {
+      this.liqHoverIndex = -1;
+      if (this._tooltipEl) this._tooltipEl.style.display = 'none';
+      this._requestRender(true, false, false);
+    });
+  }
+
+  _handleLiqHover(e) {
+    if (!this.liqCanvas || !this.liqBarCoords.length) return;
+    const rect = this.liqCanvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    let hovered = null;
+    for (const b of this.liqBarCoords) {
+      if (mx >= b.x - 2 && mx <= b.x + b.width + 2 && my >= 0 && my <= (this._lh || this.liqCanvas.height) - 15) {
+        hovered = b;
+        break;
+      }
+    }
+
+    if (hovered && hovered.index !== this.liqHoverIndex) {
+      this.liqHoverIndex = hovered.index;
+      this._requestRender(true, false, false);
+
+      if (this._tooltipEl) {
+        const it = hovered.item;
+        const total = (it.long_usd || 0) + (it.short_usd || 0);
+        this._tooltipEl.innerHTML = `
+          <div style="font-weight:800; color:var(--brand-cyan); margin-bottom:2px;">⏱️ ${it.time_str} (${it.count || 0}건 청산)</div>
+          <div style="color:var(--short-red); font-size:10px;">🔴 롱 청산: <b>$${this._fmtUsd(it.long_usd || 0)}</b></div>
+          <div style="color:var(--long-green); font-size:10px;">🟢 숏 청산: <b>$${this._fmtUsd(it.short_usd || 0)}</b></div>
+          <div style="color:var(--warn-amber); font-size:10px; margin-top:2px;">💰 합계: <b>$${this._fmtUsd(total)}</b></div>
+        `;
+        this._tooltipEl.style.display = 'block';
+        this._tooltipEl.style.left = `${hovered.x + hovered.width / 2}px`;
+        this._tooltipEl.style.top = `${Math.max(10, hovered.y - 10)}px`;
+      }
+    } else if (!hovered && this.liqHoverIndex !== -1) {
+      this.liqHoverIndex = -1;
+      this._requestRender(true, false, false);
+      if (this._tooltipEl) this._tooltipEl.style.display = 'none';
+    }
+  }
+
+  _requestRender(liq = true, ticks = true, cvd = true) {
+    if (liq) this._dirtyLiq = true;
     if (ticks) this._dirtyTicks = true;
     if (cvd) this._dirtyCvd = true;
     if (!this._rafPending) {
       this._rafPending = true;
       requestAnimationFrame(() => {
         this._rafPending = false;
-        if (this._dirtyCandles) { this._drawCandles(); this._dirtyCandles = false; }
+        if (this._dirtyLiq) { this._drawLiquidationDist(); this._dirtyLiq = false; }
         if (this._dirtyTicks) { this._drawTicks(); this._dirtyTicks = false; }
         if (this._dirtyCvd) { this._drawCvd(); this._dirtyCvd = false; }
       });
@@ -56,7 +148,7 @@ export class ProChart {
     const go = () => {
       const dpr = devicePixelRatio || 1;
       for (const [canvas, ctx, wKey, hKey] of [
-        [this.candleCanvas, this.candleCtx, '_cw', '_ch'],
+        [this.liqCanvas, this.liqCtx, '_lw', '_lh'],
         [this.tickCanvas, this.tickCtx, '_tw', '_th'],
         [this.cvdCanvas, this.cvdCtx, '_vw', '_vh'],
       ]) {
@@ -88,7 +180,6 @@ export class ProChart {
       return;
     }
     this.symbol = sym;
-    this.candles1m = [];
     this.ticks1s = [];
     this.liquidations = [];
     this.armedZone = null;
@@ -101,7 +192,65 @@ export class ProChart {
     if (this._cvdBybLegendEl) this._cvdBybLegendEl.textContent = 'BYB: $0';
 
     this._fetch();
+    this._fetchLiquidationDistribution();
     this._requestRender(true, true, true);
+  }
+
+  async _fetchLiquidationDistribution() {
+    try {
+      // 1. If Auto-Timeframe, probe symbol's timespan to auto-detect optimal bucket interval
+      if (this.isAutoTimeframe) {
+        const probeRes = await fetch(`/api/liquidations/analytics?timeframe=5m&symbol=${this.symbol}`);
+        const probeData = await probeRes.json();
+        const records = probeData.recent_records || [];
+
+        let autoTf = '5m';
+        if (records.length >= 2) {
+          const timestamps = records.map(r => r.timestamp || 0).filter(t => t > 0);
+          const minT = Math.min(...timestamps);
+          const maxT = Math.max(...timestamps);
+          const spanMs = maxT - minT;
+
+          if (spanMs <= 35 * 60 * 1000) {
+            autoTf = '1m'; // Densely concentrated in last 30m
+          } else if (spanMs <= 4 * 3600 * 1000) {
+            autoTf = '5m'; // Concentrated in 4 hours
+          } else if (spanMs <= 16 * 3600 * 1000) {
+            autoTf = '15m'; // Spanning half a day
+          } else {
+            autoTf = '1h'; // Spanning 24h+
+          }
+        } else if (records.length === 0) {
+          autoTf = '5m';
+        }
+
+        this.effectiveTimeframe = autoTf;
+        if (this._autoTfBadgeEl) {
+          this._autoTfBadgeEl.textContent = `AUTO: ${autoTf.toUpperCase()}`;
+          this._autoTfBadgeEl.style.borderColor = 'var(--brand-cyan)';
+          this._autoTfBadgeEl.style.color = 'var(--brand-cyan)';
+        }
+      }
+
+      // 2. Fetch analytics with effective timeframe
+      const url = `/api/liquidations/analytics?timeframe=${this.effectiveTimeframe}&symbol=${this.symbol}`;
+      const res = await fetch(url);
+      const data = await res.json();
+
+      this.liqTimeSeries = data.time_series || [];
+      this.liqSummary = data.summary || { total_usd: 0, long_usd: 0, short_usd: 0, count: 0 };
+
+      if (this._longLiqSumEl) {
+        this._longLiqSumEl.textContent = `🔴 롱 $${this._fmtUsd(this.liqSummary.long_usd || 0)}`;
+      }
+      if (this._shortLiqSumEl) {
+        this._shortLiqSumEl.textContent = `🟢 숏 $${this._fmtUsd(this.liqSummary.short_usd || 0)}`;
+      }
+
+      this._requestRender(true, false, false);
+    } catch (e) {
+      console.error('청산 데이터 분포 조회 에러:', e);
+    }
   }
 
   onCvdBatch(items, timeSec) {
@@ -180,60 +329,66 @@ export class ProChart {
     // push tick
     this.ticks1s.push({ t: ms, p: tick.price });
 
-    // 120초 윈도우 안전 슬라이딩 (앞쪽 오래된 틱만 안전 제거, 절대 전체 리셋 금지!)
-    const cutoff = ms - 120_000;
+    // prune ticks older than 120s
+    const cutoff = ms - 120000;
     while (this.ticks1s.length > 2 && this.ticks1s[0].t < cutoff) {
       this.ticks1s.shift();
     }
-    // 대량 거래량 폭주시 메모리 보호 (최대 1000개 보존)
-    if (this.ticks1s.length > 1000) {
-      this.ticks1s.splice(0, this.ticks1s.length - 1000);
-    }
 
-    // update live candle
-    const minTs = Math.floor(ms / 60000) * 60000;
-    if (this.candles1m.length) {
-      const last = this.candles1m[this.candles1m.length - 1];
-      if (last.t === minTs) {
-        last.h = Math.max(last.h, tick.price);
-        last.l = Math.min(last.l, tick.price);
-        last.c = tick.price;
-        this._requestRender(false, true);
-      } else if (minTs > last.t) {
-        this.candles1m.push({ t: minTs, o: tick.price, h: tick.price, l: tick.price, c: tick.price, v: 0 });
-        if (this.candles1m.length > 80) this.candles1m.shift();
-        this._requestRender(true, true);
-      }
-    } else {
-        this._requestRender(true, true);
-    }
+    this._requestRender(false, true, false);
   }
 
   onLiquidation(ev) {
     if (ev.symbol !== this.symbol) return;
+    const isLong = ev.pos_side === 'long' || ev.side === 'sell' || ev.side === 2;
+    const usd = ev.notional_usd || 100;
+
     this.liquidations.push({
       t: ev.timestamp || Date.now(),
       p: ev.price || this.latestPrice,
-      isLong: ev.pos_side === 'long' || ev.side === 'sell',
-      usd: ev.notional_usd || 100,
+      isLong: isLong,
+      usd: usd,
       exch: (ev.exchange || 'bin').slice(0, 3).toUpperCase(),
     });
     if (this.liquidations.length > 60) this.liquidations.shift();
-    this._requestRender();
+
+    // Accumulate into latest time-series bucket
+    if (this.liqTimeSeries.length > 0) {
+      const lastBucket = this.liqTimeSeries[this.liqTimeSeries.length - 1];
+      if (isLong) {
+        lastBucket.long_usd = (lastBucket.long_usd || 0) + usd;
+      } else {
+        lastBucket.short_usd = (lastBucket.short_usd || 0) + usd;
+      }
+      lastBucket.count = (lastBucket.count || 0) + 1;
+    }
+
+    // Update summary
+    if (isLong) {
+      this.liqSummary.long_usd = (this.liqSummary.long_usd || 0) + usd;
+    } else {
+      this.liqSummary.short_usd = (this.liqSummary.short_usd || 0) + usd;
+    }
+    this.liqSummary.total_usd = (this.liqSummary.total_usd || 0) + usd;
+    this.liqSummary.count = (this.liqSummary.count || 0) + 1;
+
+    if (this._longLiqSumEl) {
+      this._longLiqSumEl.textContent = `🔴 롱 $${this._fmtUsd(this.liqSummary.long_usd)}`;
+    }
+    if (this._shortLiqSumEl) {
+      this._shortLiqSumEl.textContent = `🟢 숏 $${this._fmtUsd(this.liqSummary.short_usd)}`;
+    }
+
+    this._requestRender(true, true, false);
   }
 
-  setArmedZone(a) { this.armedZone = a; this._requestRender(); }
+  setArmedZone(a) { this.armedZone = a; this._requestRender(false, true, false); }
 
   /* ── data fetch ── */
   async _fetch() {
     try {
       const r = await fetch(`/api/history?symbol=${this.symbol}`);
       const d = await r.json();
-      if (d.candles?.length) {
-        this.candles1m = d.candles;
-        const lc = d.candles[d.candles.length - 1];
-        this.latestPrice = lc.c;
-      }
       if (d.trades?.length) {
         this.ticks1s = d.trades.map(tr => ({ t: tr.t, p: tr.p }));
       } else if (d.candles?.length && this.ticks1s.length < 2) {
@@ -245,6 +400,7 @@ export class ProChart {
           { t: now - 15000, p: lc.o },
           { t: now, p: lc.c }
         ];
+        this.latestPrice = lc.c;
       }
       if (d.liquidations?.length) {
         this.liquidations = d.liquidations.map(l => ({
@@ -258,64 +414,116 @@ export class ProChart {
     } catch (e) { console.error('chart fetch err', e); }
   }
 
-  // _draw() method removed as it's replaced by _requestRender
-
   /* ====================================================================
-     1-MIN CANDLESTICK
+     TOP: REAL-TIME & HISTORICAL LIQUIDATION DISTRIBUTION (Replaced 1-Min Candle)
      ==================================================================== */
-  _drawCandles() {
-    const ctx = this.candleCtx, w = this._cw, h = this._ch;
-    if (!w || !h) return;
+  _drawLiquidationDist() {
+    const ctx = this.liqCtx, w = this._lw, h = this._lh;
+    if (!ctx || !w || !h) return;
     ctx.clearRect(0, 0, w, h);
-    const candles = this.candles1m;
-    if (!candles.length) {
-      ctx.fillStyle = '#7a8ba6'; ctx.font = '12px "JetBrains Mono",monospace';
+
+    const series = this.liqTimeSeries;
+    this.liqBarCoords = [];
+
+    if (!series || series.length === 0) {
+      ctx.fillStyle = '#7a8ba6';
+      ctx.font = '12px "JetBrains Mono", monospace';
       ctx.textAlign = 'center';
-      ctx.fillText(`${this.symbol} 1분봉 로딩 중...`, w / 2, h / 2);
+      ctx.fillText(`${this.symbol} 청산 데이터 수집 대기 중... (실시간 감시 중)`, w / 2, h / 2);
       return;
     }
 
     const pW = w - this.pad.left - this.pad.right;
     const pH = h - this.pad.top - this.pad.bottom;
 
-    let lo = Infinity, hi = -Infinity;
-    for (const c of candles) { if (c.l < lo) lo = c.l; if (c.h > hi) hi = c.h; }
-    const rng = (hi - lo) || lo * 0.005;
-    lo -= rng * 0.06; hi += rng * 0.06;
+    // Find max total USD
+    let maxUsd = 0;
+    for (const item of series) {
+      const tot = (item.long_usd || 0) + (item.short_usd || 0);
+      if (tot > maxUsd) maxUsd = tot;
+    }
+    if (maxUsd === 0) maxUsd = 500;
+    maxUsd *= 1.15; // 15% headroom
 
-    const yOf = p => this.pad.top + (1 - (p - lo) / (hi - lo)) * pH;
-    const n = candles.length;
-    const slot = pW / Math.max(n, 12);
-    const bw = Math.max(3, slot * 0.65);
+    // Draw Grid & Y-Axis Scale
+    ctx.strokeStyle = 'hsl(222, 25%, 15%)';
+    ctx.lineWidth = 1;
+    ctx.font = '10px "JetBrains Mono", monospace';
+    ctx.fillStyle = '#6b7a8d';
+    ctx.textAlign = 'left';
 
-    // grid
-    this._grid(ctx, w, h, lo, hi, yOf);
+    const gridLines = 3;
+    for (let i = 0; i <= gridLines; i++) {
+      const y = this.pad.top + (pH * (1 - i / gridLines));
+      const val = maxUsd * (i / gridLines);
+      ctx.beginPath();
+      ctx.moveTo(this.pad.left, y);
+      ctx.lineTo(w - this.pad.right, y);
+      ctx.stroke();
+      ctx.fillText(`$${this._fmtUsd(val)}`, w - this.pad.right + 4, y + 3);
+    }
 
-    // candles
-    const xMap = new Map();
-    candles.forEach((c, i) => {
-      const x = this.pad.left + (i + 0.5) * slot;
-      xMap.set(c.t, x);
-      const up = c.c >= c.o;
-      const col = up ? '#2ecc71' : '#e74c6b';
-      ctx.strokeStyle = col; ctx.lineWidth = 1.2;
-      ctx.beginPath(); ctx.moveTo(x, yOf(c.h)); ctx.lineTo(x, yOf(c.l)); ctx.stroke();
-      const t = Math.min(yOf(c.o), yOf(c.c));
-      const b = Math.max(yOf(c.o), yOf(c.c));
-      ctx.fillStyle = col;
-      ctx.fillRect(x - bw / 2, t, bw, Math.max(2, b - t));
-    });
+    // Draw Stacked Volume Bars
+    const n = series.length;
+    const barW = Math.max(3, Math.min(28, (pW / n) - 3));
+    const step = pW / n;
+    const baseY = this.pad.top + pH;
 
-    // price line
-    this._priceLine(ctx, w, yOf(this.latestPrice), null);
+    for (let i = 0; i < n; i++) {
+      const item = series[i];
+      const x = this.pad.left + (i * step) + (step - barW) / 2;
+      const longUsd = item.long_usd || 0;
+      const shortUsd = item.short_usd || 0;
+      const total = longUsd + shortUsd;
+
+      const longH = (longUsd / maxUsd) * pH;
+      const shortH = (shortUsd / maxUsd) * pH;
+      const totalH = longH + shortH;
+
+      // Draw Long (Red) on bottom
+      if (longH > 0) {
+        ctx.fillStyle = i === this.liqHoverIndex ? '#ff5270' : '#e74c6b';
+        ctx.fillRect(x, baseY - longH, barW, longH);
+      }
+
+      // Draw Short (Green) stacked above Long
+      if (shortH > 0) {
+        ctx.fillStyle = i === this.liqHoverIndex ? '#1ae694' : '#00d27a';
+        ctx.fillRect(x, baseY - totalH, barW, shortH);
+      }
+
+      // Hover highlight border
+      if (i === this.liqHoverIndex) {
+        ctx.strokeStyle = '#00f2fe';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(x - 1, baseY - totalH - 1, barW + 2, totalH + 2);
+      }
+
+      this.liqBarCoords.push({
+        x: x,
+        y: baseY - totalH,
+        width: barW,
+        height: totalH,
+        item: item,
+        index: i
+      });
+
+      // Time X-Axis Label
+      const labelInterval = Math.max(1, Math.floor(n / 6));
+      if (i % labelInterval === 0 || i === n - 1) {
+        ctx.fillStyle = '#8b949e';
+        ctx.textAlign = 'center';
+        ctx.fillText(item.time_str || '', x + barW / 2, h - 6);
+      }
+    }
   }
 
   /* ====================================================================
-     1-SEC TICK FLOW
+     MID: 1-SEC TICK FLOW & LIQUIDATION BURST BUBBLES
      ==================================================================== */
   _drawTicks() {
     const ctx = this.tickCtx, w = this._tw, h = this._th;
-    if (!w || !h) return;
+    if (!ctx || !w || !h) return;
     ctx.clearRect(0, 0, w, h);
     const ticks = this.ticks1s;
     if (ticks.length < 2) {
@@ -437,7 +645,7 @@ export class ProChart {
   }
 
   /* ====================================================================
-     DUAL-EXCHANGE CVD FLOW (BINANCE vs BYBIT)
+     BOT: DUAL-EXCHANGE CVD FLOW (BINANCE vs BYBIT)
      ==================================================================== */
   _drawCvd() {
     const ctx = this.cvdCtx, w = this._vw, h = this._vh;
@@ -448,80 +656,83 @@ export class ProChart {
     if (!pts || pts.length < 2) {
       ctx.fillStyle = '#7a8ba6'; ctx.font = '12px "JetBrains Mono",monospace';
       ctx.textAlign = 'center';
-      ctx.fillText(`${this.symbol} CVD 실시간 체결 데이터 수신 대기 중...`, w / 2, h / 2);
+      ctx.fillText(`${this.symbol} 실시간 듀얼 CVD 체결 델타 집계 중...`, w / 2, h / 2);
       return;
     }
 
     const pW = w - this.pad.left - this.pad.right;
     const pH = h - this.pad.top - this.pad.bottom;
 
-    let lo = 0, hi = 0;
+    let minVal = Infinity, maxVal = -Infinity;
     for (const p of pts) {
-      if (p.bin < lo) lo = p.bin; if (p.bin > hi) hi = p.bin;
-      if (p.byb < lo) lo = p.byb; if (p.byb > hi) hi = p.byb;
+      if (p.bin < minVal) minVal = p.bin;
+      if (p.bin > maxVal) maxVal = p.bin;
+      if (p.byb < minVal) minVal = p.byb;
+      if (p.byb > maxVal) maxVal = p.byb;
     }
-    if (lo > 0) lo = 0;
-    if (hi < 0) hi = 0;
-    const rng = (hi - lo) || 1000;
-    lo -= rng * 0.12; hi += rng * 0.12;
 
-    const yOf = v => this.pad.top + (1 - (v - lo) / (hi - lo)) * pH;
+    minVal = Math.min(minVal, 0.0);
+    maxVal = Math.max(maxVal, 0.0);
+    const rng = (maxVal - minVal) || 1000;
+    minVal -= rng * 0.08;
+    maxVal += rng * 0.08;
+
+    const yOf = v => this.pad.top + (1 - (v - minVal) / (maxVal - minVal)) * pH;
     const firstT = pts[0].t, lastT = pts[pts.length - 1].t;
     const tRange = (lastT - firstT) || 1;
     const xOf = t => this.pad.left + ((t - firstT) / tRange) * pW;
 
-    // Grid
-    ctx.strokeStyle = 'hsl(222,25%,15%)'; ctx.lineWidth = 1;
-    for (let i = 0; i <= 4; i++) {
-      const v = lo + (i / 4) * (hi - lo);
+    // Grid & Zero-line
+    ctx.strokeStyle = 'hsl(222,25%,15%)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 3; i++) {
+      const v = minVal + (i / 3) * (maxVal - minVal);
       const y = yOf(v);
       ctx.beginPath(); ctx.moveTo(this.pad.left, y); ctx.lineTo(w - this.pad.right, y); ctx.stroke();
       ctx.fillStyle = '#6b7a8d'; ctx.font = '10px "JetBrains Mono",monospace'; ctx.textAlign = 'left';
-      ctx.fillText(this._fmtUsd(v), w - this.pad.right + 4, y + 3);
+      ctx.fillText(`$${this._fmtUsd(v)}`, w - this.pad.right + 4, y + 3);
     }
 
-    // Zero baseline ($0)
-    const yZero = yOf(0);
+    const yZero = yOf(0.0);
     ctx.save();
-    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-    ctx.lineWidth = 1.2;
-    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = 'hsla(0,0%,100%,0.2)';
+    ctx.setLineDash([2, 2]);
     ctx.beginPath(); ctx.moveTo(this.pad.left, yZero); ctx.lineTo(w - this.pad.right, yZero); ctx.stroke();
     ctx.restore();
 
-    // 1. Binance CVD Line (Bright Yellow)
+    // 1. Draw Binance CVD (Yellow Line)
     ctx.beginPath();
     ctx.moveTo(xOf(pts[0].t), yOf(pts[0].bin));
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(xOf(pts[i].t), yOf(pts[i].bin));
-    ctx.strokeStyle = '#f3ba2f'; ctx.lineWidth = 2.0; ctx.stroke();
+    for (let i = 1; i < pts.length; i++) {
+      ctx.lineTo(xOf(pts[i].t), yOf(pts[i].bin));
+    }
+    ctx.strokeStyle = 'hsl(45, 100%, 55%)';
+    ctx.lineWidth = 1.8;
+    ctx.stroke();
 
-    // 2. Bybit CVD Line (Bybit Gold/Orange)
+    // 2. Draw Bybit CVD (Gold/Orange Line)
     ctx.beginPath();
     ctx.moveTo(xOf(pts[0].t), yOf(pts[0].byb));
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(xOf(pts[i].t), yOf(pts[i].byb));
-    ctx.strokeStyle = '#ff9800'; ctx.lineWidth = 2.0; ctx.stroke();
-
-    // Right-side endpoint badges
-    const lastPt = pts[pts.length - 1];
-    ctx.fillStyle = '#f3ba2f';
-    ctx.beginPath(); ctx.arc(w - this.pad.right - 4, yOf(lastPt.bin), 3.5, 0, Math.PI * 2); ctx.fill();
-
-    ctx.fillStyle = '#ff9800';
-    ctx.beginPath(); ctx.arc(w - this.pad.right - 4, yOf(lastPt.byb), 3.5, 0, Math.PI * 2); ctx.fill();
-  }
-
-  _fmtUsd(usd) {
-    const abs = Math.abs(usd);
-    const sign = usd < 0 ? '-' : '+';
-    if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2)}M`;
-    if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(1)}k`;
-    return `${sign}$${abs.toFixed(0)}`;
+    for (let i = 1; i < pts.length; i++) {
+      ctx.lineTo(xOf(pts[i].t), yOf(pts[i].byb));
+    }
+    ctx.strokeStyle = 'hsl(32, 95%, 55%)';
+    ctx.lineWidth = 1.8;
+    ctx.stroke();
   }
 
   _fmt(p) {
-    if (p > 100) return p.toFixed(2);
-    if (p > 1) return p.toFixed(4);
-    if (p > 0.01) return p.toFixed(5);
+    if (p == null || isNaN(p)) return '0.00';
+    if (p >= 1000) return p.toFixed(2);
+    if (p >= 1) return p.toFixed(4);
     return p.toFixed(6);
+  }
+
+  _fmtUsd(val) {
+    if (val == null || isNaN(val)) return '0';
+    const abs = Math.abs(val);
+    if (abs >= 1_000_000) return `${(val / 1_000_000).toFixed(2)}M`;
+    if (abs >= 1_000) return `${(val / 1_000).toFixed(1)}k`;
+    return `${Math.round(val)}`;
   }
 }

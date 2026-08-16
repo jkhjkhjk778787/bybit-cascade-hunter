@@ -111,20 +111,39 @@
           <div class="chart-sym-info">
             <span class="current-sym-name" id="currentSymName">VELVETUSDT</span>
             <span class="current-sym-price" id="currentSymPrice">$1.0850</span>
-            <span style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">DUAL VIEW (1M / 1S)</span>
+            <span style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">PRO VIEW (청산 분포 / 1초 틱 / CVD)</span>
           </div>
           <div style="display:flex; gap:10px; font-size:11px; color:var(--text-secondary);">
-            <span>📊 1분봉</span>
+            <span>🌊 청산 분포</span>
             <span>⚡ 1초 틱</span>
             <span>🔴 롱 청산</span>
             <span>🟢 숏 청산</span>
           </div>
         </div>
         <div class="dual-chart-container">
-          <!-- Top Subpane: 1-Minute Candlestick Chart -->
+          <!-- Top Subpane: Real-Time & Historical Liquidation Distribution (Replaced 1-Minute Candle) -->
           <div class="chart-subpane">
-            <div class="subpane-label">📊 1-MIN CANDLESTICK (1분봉)</div>
-            <canvas id="candle1mCanvas"></canvas>
+            <div class="subpane-label" style="display:flex; justify-content:space-between; align-items:center; width:calc(100% - 24px);">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span>🌊 LIQUIDATION DISTRIBUTION (청산 데이터 분포)</span>
+                <span id="centerAutoTfBadge" style="background:hsla(185, 100%, 50%, 0.15); color:var(--brand-cyan); border:1px solid var(--brand-cyan); font-size:9px; font-weight:800; padding:1px 5px; border-radius:3px; font-family:var(--font-mono);">AUTO: 5M</span>
+              </div>
+              <div style="display:flex; gap:8px; align-items:center;">
+                <div class="timerate-selector" id="centerLiqTfSelector">
+                  <button class="btn-timerate active" data-tf="auto">AUTO</button>
+                  <button class="btn-timerate" data-tf="1m">1M</button>
+                  <button class="btn-timerate" data-tf="5m">5M</button>
+                  <button class="btn-timerate" data-tf="15m">15M</button>
+                  <button class="btn-timerate" data-tf="1h">1H</button>
+                </div>
+                <div id="centerLiqStats" style="display:flex; gap:6px; font-size:10px; font-family:var(--font-mono);">
+                  <span id="centerLongLiqSum" style="color:var(--short-red); font-weight:700;">🔴 $0</span>
+                  <span id="centerShortLiqSum" style="color:var(--long-green); font-weight:700;">🟢 $0</span>
+                </div>
+              </div>
+            </div>
+            <canvas id="centerLiqCanvas"></canvas>
+            <div id="centerLiqTooltip" class="liq-chart-tooltip" style="display:none;"></div>
           </div>
           <!-- Middle Subpane: 1-Second Real-Time High-Frequency Tick Chart -->
           <div class="chart-subpane">
