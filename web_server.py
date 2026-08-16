@@ -1370,7 +1370,7 @@ class CascadeTradingServer:
                         })
             except Exception as e:
                 logger.error(f"CVD 브로드캐스트 에러: {e}")
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.05)
 
     async def run_position_guard_loop(self):
         """실시간 포지션 감시 및 경과시간 추적 엔진"""

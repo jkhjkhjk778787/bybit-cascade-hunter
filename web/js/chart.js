@@ -55,6 +55,21 @@ export class ProChart {
     this._bindTimeframeButtons();
     this._bindTooltipEvents();
     this._initResize();
+    this._startAnimationLoop();
+  }
+
+  _startAnimationLoop() {
+    const loop = () => {
+      // 60 FPS 연속 실시간 시간축 전진 렌더링 (뚝뚝 끊김 완전 제거)
+      if (this.ticks1s && this.ticks1s.length > 0) {
+        this._drawTicks();
+      }
+      if (this.cvdPoints && this.cvdPoints.length > 0) {
+        this._drawCvd();
+      }
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
   }
 
   _bindTimeframeButtons() {
@@ -256,9 +271,8 @@ export class ProChart {
       byb: this.bybitCvd
     });
 
-    const cutoff = now - 180_000;
-    while (this.cvdPoints.length > 2 && this.cvdPoints[0].t < cutoff) {
-      this.cvdPoints.shift();
+    if (this.cvdPoints.length > 600) {
+      this.cvdPoints = this.cvdPoints.slice(-400);
     }
 
     if (this._cvdBinLegendEl) {
@@ -271,8 +285,6 @@ export class ProChart {
       this._cvdBybLegendEl.textContent = `BYB: ${ySign}$${this._fmtUsd(this.bybitCvd)}`;
       this._cvdBybLegendEl.style.color = '#00F0FF';
     }
-
-    this._requestRender(false, false, true);
   }
 
   onCvdUpdate(msg) {
@@ -288,10 +300,8 @@ export class ProChart {
       byb: this.bybitCvd
     });
 
-    // Keep last 180 seconds rolling window
-    const cutoff = now - 180_000;
-    while (this.cvdPoints.length > 2 && this.cvdPoints[0].t < cutoff) {
-      this.cvdPoints.shift();
+    if (this.cvdPoints.length > 600) {
+      this.cvdPoints = this.cvdPoints.slice(-400);
     }
 
     // Update legend
@@ -305,8 +315,6 @@ export class ProChart {
       this._cvdBybLegendEl.textContent = `BYB: ${ySign}$${this._fmtUsd(this.bybitCvd)}`;
       this._cvdBybLegendEl.style.color = '#00F0FF';
     }
-
-    this._requestRender(false, false, true);
   }
 
   onTick(tick) {
@@ -318,13 +326,9 @@ export class ProChart {
     // push tick
     this.ticks1s.push({ t: ms, p: tick.price });
 
-    // prune ticks older than 180s
-    const cutoff = ms - 180000;
-    while (this.ticks1s.length > 2 && this.ticks1s[0].t < cutoff) {
-      this.ticks1s.shift();
+    if (this.ticks1s.length > 600) {
+      this.ticks1s = this.ticks1s.slice(-400);
     }
-
-    this._requestRender(false, true, false);
   }
 
   onLiquidation(ev) {
@@ -597,7 +601,7 @@ export class ProChart {
     if (!ctx || !w || !h) return;
     ctx.clearRect(0, 0, w, h);
     const ticks = this.ticks1s;
-    if (ticks.length < 2) {
+    if (!ticks || ticks.length < 1) {
       ctx.fillStyle = '#7a8ba6'; ctx.font = '12px "JetBrains Mono",monospace';
       ctx.textAlign = 'center';
       ctx.fillText(`${this.symbol} 실시간 틱 수신 대기 중...`, w / 2, h / 2);
@@ -606,16 +610,21 @@ export class ProChart {
 
     const pW = w - this.pad.left - this.pad.right;
     const pH = h - this.pad.top - this.pad.bottom;
+    const now = Date.now();
+    const windowMs = 120_000; // 2분 고정 롤링 윈도우 (60FPS 연속 부드러운 시간축 전진)
+    const firstT = now - windowMs;
 
     let lo = Infinity, hi = -Infinity;
-    for (const t of ticks) { if (t.p < lo) lo = t.p; if (t.p > hi) hi = t.p; }
-    const rng = (hi - lo) || lo * 0.003;
+    for (let i = 0; i < ticks.length; i++) {
+      const p = ticks[i].p;
+      if (p < lo) lo = p;
+      if (p > hi) hi = p;
+    }
+    const rng = (hi - lo) || (lo * 0.003) || 1.0;
     lo -= rng * 0.08; hi += rng * 0.08;
 
     const yOf = p => this.pad.top + (1 - (p - lo) / (hi - lo)) * pH;
-    const firstT = ticks[0].t, lastT = ticks[ticks.length - 1].t;
-    const tRange = (lastT - firstT) || 1;
-    const xOf = t => this.pad.left + ((t - firstT) / tRange) * pW;
+    const xOf = t => this.pad.left + Math.max(0, Math.min(1, (t - firstT) / windowMs)) * pW;
 
     // grid
     this._grid(ctx, w, h, lo, hi, yOf);
@@ -627,6 +636,14 @@ export class ProChart {
       ctx.fillRect(this.pad.left, this.pad.top, pW, pH);
     }
 
+    let startIdx = 0;
+    for (let i = 0; i < ticks.length; i++) {
+      if (ticks[i].t >= firstT) {
+        startIdx = Math.max(0, i - 1);
+        break;
+      }
+    }
+
     // area fill
     let grad = this._tickGrad;
     if (!grad) {
@@ -636,27 +653,30 @@ export class ProChart {
       this._tickGrad = grad;
     }
     ctx.beginPath();
-    ctx.moveTo(xOf(ticks[0].t), yOf(ticks[0].p));
-    for (let i = 1; i < ticks.length; i++) ctx.lineTo(xOf(ticks[i].t), yOf(ticks[i].p));
-    ctx.lineTo(xOf(lastT), h - this.pad.bottom);
-    ctx.lineTo(xOf(firstT), h - this.pad.bottom);
+    ctx.moveTo(xOf(ticks[startIdx].t), yOf(ticks[startIdx].p));
+    for (let i = startIdx + 1; i < ticks.length; i++) ctx.lineTo(xOf(ticks[i].t), yOf(ticks[i].p));
+    ctx.lineTo(xOf(now), yOf(ticks[ticks.length - 1].p));
+    ctx.lineTo(xOf(now), h - this.pad.bottom);
+    ctx.lineTo(xOf(ticks[startIdx].t), h - this.pad.bottom);
     ctx.closePath();
     ctx.fillStyle = grad; ctx.fill();
 
     // line
     ctx.beginPath();
-    ctx.moveTo(xOf(ticks[0].t), yOf(ticks[0].p));
-    for (let i = 1; i < ticks.length; i++) ctx.lineTo(xOf(ticks[i].t), yOf(ticks[i].p));
-    ctx.strokeStyle = 'hsl(192,95%,50%)'; ctx.lineWidth = 1.8; ctx.stroke();
+    ctx.moveTo(xOf(ticks[startIdx].t), yOf(ticks[startIdx].p));
+    for (let i = startIdx + 1; i < ticks.length; i++) ctx.lineTo(xOf(ticks[i].t), yOf(ticks[i].p));
+    ctx.lineTo(xOf(now), yOf(ticks[ticks.length - 1].p));
+    ctx.strokeStyle = 'hsl(192,95%,50%)'; ctx.lineWidth = 2.0; ctx.stroke();
 
     // liquidation markers on ticks
     for (const liq of this.liquidations) {
-      if (liq.t < firstT || liq.t > lastT) continue;
+      if (liq.t < firstT || liq.t > now) continue;
       this._liqMark(ctx, xOf(liq.t), yOf(liq.p), liq, h);
     }
 
     // price badge
-    this._priceLine(ctx, w, yOf(this.latestPrice), this.latestPrice);
+    const curP = this.latestPrice || ticks[ticks.length - 1].p;
+    this._priceLine(ctx, w, yOf(curP), curP);
   }
 
   /* ── shared helpers ── */
@@ -724,7 +744,7 @@ export class ProChart {
     ctx.clearRect(0, 0, w, h);
 
     const pts = this.cvdPoints;
-    if (!pts || pts.length < 2) {
+    if (!pts || pts.length < 1) {
       ctx.fillStyle = '#7a8ba6'; ctx.font = '12px "JetBrains Mono",monospace';
       ctx.textAlign = 'center';
       ctx.fillText(`${this.symbol} 실시간 듀얼 CVD 체결 델타 집계 중...`, w / 2, h / 2);
@@ -733,9 +753,13 @@ export class ProChart {
 
     const pW = w - this.pad.left - this.pad.right;
     const pH = h - this.pad.top - this.pad.bottom;
+    const now = Date.now();
+    const windowMs = 120_000; // 2분 고정 롤링 윈도우 (60FPS 연속 부드러운 시간축 전진)
+    const firstT = now - windowMs;
 
     let minVal = Infinity, maxVal = -Infinity;
-    for (const p of pts) {
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i];
       if (p.bin < minVal) minVal = p.bin;
       if (p.bin > maxVal) maxVal = p.bin;
       if (p.byb < minVal) minVal = p.byb;
@@ -749,9 +773,7 @@ export class ProChart {
     maxVal += rng * 0.08;
 
     const yOf = v => this.pad.top + (1 - (v - minVal) / (maxVal - minVal)) * pH;
-    const firstT = pts[0].t, lastT = pts[pts.length - 1].t;
-    const tRange = (lastT - firstT) || 1;
-    const xOf = t => this.pad.left + ((t - firstT) / tRange) * pW;
+    const xOf = t => this.pad.left + Math.max(0, Math.min(1, (t - firstT) / windowMs)) * pW;
 
     // Grid & Zero-line
     ctx.strokeStyle = 'hsl(222,25%,15%)';
@@ -771,22 +793,32 @@ export class ProChart {
     ctx.beginPath(); ctx.moveTo(this.pad.left, yZero); ctx.lineTo(w - this.pad.right, yZero); ctx.stroke();
     ctx.restore();
 
+    let startIdx = 0;
+    for (let i = 0; i < pts.length; i++) {
+      if (pts[i].t >= firstT) {
+        startIdx = Math.max(0, i - 1);
+        break;
+      }
+    }
+
     // 1. Draw Binance CVD (Bright Gold Yellow Line 🟡)
     ctx.beginPath();
-    ctx.moveTo(xOf(pts[0].t), yOf(pts[0].bin));
-    for (let i = 1; i < pts.length; i++) {
+    ctx.moveTo(xOf(pts[startIdx].t), yOf(pts[startIdx].bin));
+    for (let i = startIdx + 1; i < pts.length; i++) {
       ctx.lineTo(xOf(pts[i].t), yOf(pts[i].bin));
     }
+    ctx.lineTo(xOf(now), yOf(pts[pts.length - 1].bin));
     ctx.strokeStyle = '#FCD535';
     ctx.lineWidth = 2.4;
     ctx.stroke();
 
     // 2. Draw Bybit CVD (Vivid Electric Cyan Line 🔵)
     ctx.beginPath();
-    ctx.moveTo(xOf(pts[0].t), yOf(pts[0].byb));
-    for (let i = 1; i < pts.length; i++) {
+    ctx.moveTo(xOf(pts[startIdx].t), yOf(pts[startIdx].byb));
+    for (let i = startIdx + 1; i < pts.length; i++) {
       ctx.lineTo(xOf(pts[i].t), yOf(pts[i].byb));
     }
+    ctx.lineTo(xOf(now), yOf(pts[pts.length - 1].byb));
     ctx.strokeStyle = '#00F0FF';
     ctx.lineWidth = 2.4;
     ctx.stroke();
