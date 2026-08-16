@@ -116,6 +116,15 @@ def run_continuous_two_stage_tuning() -> Dict[str, Any]:
     df_liqs, df_trades = load_in_memory_data()
     logger.info(f"📊 [데이터 로드] 청산: {len(df_liqs):,}건 | 틱: {len(df_trades):,}건")
 
+    # 기존 활성 심볼 로드 (히스테리시스 완충 기준 적용)
+    currently_active = set()
+    if os.path.exists(OUTPUT_CONFIG_PATH):
+        try:
+            with open(OUTPUT_CONFIG_PATH, "r") as f:
+                currently_active = set(json.load(f).get("symbols", {}).keys())
+        except Exception:
+            pass
+
     symbols = df_liqs['symbol'].unique()
     elite_symbols = {}
     cost_pct = 0.0012
@@ -126,6 +135,12 @@ def run_continuous_two_stage_tuning() -> Dict[str, Any]:
 
         if len(s_l) < 3 or len(s_t) < 500:
             continue
+
+        # 🛡️ 히스테리시스 완충 임계값: 기존 활성 심볼은 완충 유지, 신규 심볼은 엄격 진입
+        is_already_active = sym in currently_active
+        req_min_trades = 4 if is_already_active else 5
+        req_min_wr = 70.0 if is_already_active else 75.0
+        req_min_pf = 1.7 if is_already_active else 2.0
 
         t_ts = s_t['ts_ms'].values
         t_px = s_t['price'].values
@@ -263,7 +278,7 @@ def run_continuous_two_stage_tuning() -> Dict[str, Any]:
 
                                     bin_armed_until = 0
 
-                            if len(trades) >= 5:
+                            if len(trades) >= req_min_trades:
                                 tot = len(trades)
                                 w_c = len([t for t in trades if t['win']])
                                 wr = (w_c / tot) * 100.0
@@ -272,7 +287,7 @@ def run_continuous_two_stage_tuning() -> Dict[str, Any]:
                                 neg_r = abs(sum([t['ret'] for t in trades if not t['win']]))
                                 pf = (pos_r / neg_r) if neg_r > 0 else 999.0
 
-                                if wr >= 75.0 and pf >= 2.0 and tot_pnl > best_pnl:
+                                if wr >= req_min_wr and pf >= req_min_pf and tot_pnl > best_pnl:
                                     best_pnl = tot_pnl
                                     best_setting = {
                                         "bin_arm_usd": bin_arm_usd,
@@ -287,12 +302,14 @@ def run_continuous_two_stage_tuning() -> Dict[str, Any]:
                                         "trades": tot,
                                         "win_rate": round(wr, 1),
                                         "total_pnl_pct": round(tot_pnl, 2),
-                                        "profit_factor": round(pf, 2)
+                                        "profit_factor": round(pf, 2),
+                                        "status": "retained" if is_already_active else "admitted"
                                     }
 
         if best_setting:
             elite_symbols[sym] = best_setting
-            logger.info(f"🏆 [2단계 자율 최적화] {sym:12s} | Binance장전: ${best_setting['bin_arm_usd']} | 유효: {best_setting['arm_sec']}s | Bybit확증낙폭: -{best_setting['bybit_confirm_drop']}% | 트레일링반등: {best_setting['trailing_bounce']}% | 승률: {best_setting['win_rate']}% | PnL: {best_setting['total_pnl_pct']:+0.1f}%")
+            status_tag = "🛡️ [완충 유지]" if is_already_active else "🏆 [신규 진입]"
+            logger.info(f"{status_tag} {sym:12s} | Binance장전: ${best_setting['bin_arm_usd']} | Bybit확증: {best_setting['bybit_confirm_drop']}% | 트레일링: {best_setting['trailing_bounce']}% | 표본: {best_setting['trades']}건 | 승률: {best_setting['win_rate']}% | PnL: {best_setting['total_pnl_pct']:+0.1f}%")
 
     return elite_symbols
 
