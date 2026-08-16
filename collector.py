@@ -495,24 +495,39 @@ class IntegratedMarketCollector:
 
 
 def fetch_top_active_symbols(limit: int = 50) -> list[str]:
-    """Bybit 24시간 거래대금 상위 활성 심볼 자동 조회"""
+    """Bybit & Binance 양대 거래소 동시 상장 선물 중 24시간 거래대금 상위 심볼 추출"""
     try:
         import urllib.request
-        req = urllib.request.Request(
+        # 1. Binance USDT-M 선물 활성 심볼 조회
+        req_bin = urllib.request.Request(
+            "https://fapi.binance.com/fapi/v1/exchangeInfo",
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
+        with urllib.request.urlopen(req_bin, timeout=5) as resp:
+            bin_data = orjson.loads(resp.read())
+        bin_syms = set(
+            s['symbol'] for s in bin_data.get('symbols', [])
+            if s.get('contractType') == 'PERPETUAL' and s.get('quoteAsset') == 'USDT' and s.get('status') == 'TRADING'
+        )
+
+        # 2. Bybit Linear 선물 티커 조회
+        req_by = urllib.request.Request(
             "https://api.bybit.com/v5/market/tickers?category=linear",
             headers={"User-Agent": "Mozilla/5.0"}
         )
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            data = orjson.loads(resp.read())
-        tickers = data.get("result", {}).get("list", [])
-        sorted_tickers = sorted(
-            [d for d in tickers if d.get("symbol", "").endswith("USDT") and "USDC" not in d.get("symbol", "")],
-            key=lambda x: float(x.get("turnover24h", 0) or 0),
-            reverse=True
-        )
-        return [d["symbol"] for d in sorted_tickers[:limit]]
+        with urllib.request.urlopen(req_by, timeout=5) as resp:
+            by_data = orjson.loads(resp.read())
+        tickers = by_data.get("result", {}).get("list", [])
+
+        # 3. 양대 거래소 동시 상장 심볼 교집합 필터링 & 거래대금 정렬
+        dual_listed = [
+            d for d in tickers
+            if d.get("symbol", "").endswith("USDT") and "USDC" not in d.get("symbol", "") and d.get("symbol") in bin_syms
+        ]
+        dual_listed.sort(key=lambda x: float(x.get("turnover24h", 0) or 0), reverse=True)
+        return [d["symbol"] for d in dual_listed[:limit]]
     except Exception as e:
-        log(f"[WARN] Bybit 상위 심볼 조회 실패: {e}")
+        log(f"[WARN] 양대 거래소 상위 심볼 조회 실패: {e}")
         return []
 
 

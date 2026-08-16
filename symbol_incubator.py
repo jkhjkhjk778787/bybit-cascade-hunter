@@ -68,25 +68,39 @@ def send_discord_report(title: str, description: str, color: int = 3447003, fiel
 
 
 class HotSymbolRadar:
-    """Bybit 500개 전 종목 중 거래대금/변동성 폭발 핫 심볼 발굴"""
+    """Bybit & Binance 동시 상장 460+종목 중 거래대금/변동성 폭발 핫 심볼 발굴"""
     @staticmethod
     def scan_hot_symbols() -> List[str]:
         try:
+            # 1. Binance USDT-M 선물 활성 심볼 조회
+            bin_syms = set()
+            try:
+                req_bin = urllib.request.Request("https://fapi.binance.com/fapi/v1/exchangeInfo", headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req_bin, timeout=5) as resp:
+                    bin_data = json.loads(resp.read().decode())
+                bin_syms = set(s['symbol'] for s in bin_data.get('symbols', []) if s.get('contractType') == 'PERPETUAL' and s.get('quoteAsset') == 'USDT' and s.get('status') == 'TRADING')
+            except Exception as e:
+                logger.warning(f"Binance exchangeInfo 조회 실패: {e}")
+
+            # 2. Bybit 티커 조회
             url = f"{BYBIT_REST_URL}/v5/market/tickers?category=linear"
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
             with urllib.request.urlopen(req, timeout=6) as resp:
                 data = json.loads(resp.read().decode())
             
             items = data.get("result", {}).get("list", [])
-            # USDT 페어 필터 & 거래대금 500만 달러 이상
             candidates = []
             for item in items:
                 sym = item.get("symbol", "")
                 if not sym.endswith("USDT") or "USDC" in sym:
                     continue
+                # Binance 선물에도 상장되어 있는지 검증 (Binance 정보 있을 때)
+                if bin_syms and sym not in bin_syms:
+                    continue
+
                 turnover = float(item.get("turnover24h", 0.0))
                 price_24h_pct = abs(float(item.get("price24hPcnt", 0.0)))
-                # 스코어 = 거래대금(로그) * 변동성
+                # 스코어 = 거래대금 * 변동성
                 if turnover >= 3000000.0:  # 300만 USDT 이상
                     score = turnover * (1.0 + price_24h_pct * 10.0)
                     candidates.append((sym, turnover, price_24h_pct, score))
