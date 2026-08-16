@@ -191,7 +191,7 @@ class ShadowIncubator:
             return
 
         all_syms = list(self.incubating_symbols.keys())
-        target_topics = set([f"liquidation.{s}" for s in all_syms] + [f"tickers.{s}" for s in all_syms])
+        target_topics = set([f"allLiquidation.{s}" for s in all_syms] + [f"tickers.{s}" for s in all_syms])
         to_sub = list(target_topics - self.subscribed_topics)
         to_unsub = list(self.subscribed_topics - target_topics)
 
@@ -264,23 +264,28 @@ class ShadowIncubator:
                                     # 가상 포지션 TP/SL/타임아웃 감시
                                     await self.check_shadow_positions(sym, p_float, now)
 
-                            elif topic.startswith("liquidation.") or topic.startswith("allLiquidation."):
-                                sym = topic.split(".")[1]
-                                l_data = data.get("data", {})
-                                side = l_data.get("side") or l_data.get("S")
-                                price = float(l_data.get("price") or l_data.get("p") or 0.0)
-                                size = float(l_data.get("size") or l_data.get("v") or 0.0)
-                                liq_usd = price * size
-                                now = time.time()
+                            elif topic.startswith("allLiquidation.") or topic.startswith("liquidation."):
+                                sym = topic.replace("allLiquidation.", "").replace("liquidation.", "")
+                                raw_data = data.get("data", [])
+                                data_list = [raw_data] if isinstance(raw_data, dict) else raw_data
 
-                                is_long_liq = (side == "Sell") or (side == "Buy" and "allLiquidation" in topic)
-                                liq_type = "LongLiq" if is_long_liq else "ShortLiq"
+                                for l_data in data_list:
+                                    side = l_data.get("side") or l_data.get("S")
+                                    price = float(l_data.get("price") or l_data.get("p") or 0.0)
+                                    size = float(l_data.get("size") or l_data.get("v") or 0.0)
+                                    liq_usd = price * size
+                                    now = time.time()
 
-                                if sym in self.incubating_symbols:
-                                    if sym not in self.liq_buffers:
-                                        self.liq_buffers[sym] = deque(maxlen=300)
-                                    self.liq_buffers[sym].append((now, liq_usd, price, liq_type))
-                                    await self.check_shadow_trigger(sym, price, now, liq_type)
+                                    # Bybit v5: 'Buy' is Long Liquidation (bankrupt long) -> LongLiq
+                                    #           'Sell' is Short Liquidation (bankrupt short) -> ShortLiq
+                                    is_long_liq = (side == "Buy")
+                                    liq_type = "LongLiq" if is_long_liq else "ShortLiq"
+
+                                    if sym in self.incubating_symbols:
+                                        if sym not in self.liq_buffers:
+                                            self.liq_buffers[sym] = deque(maxlen=300)
+                                        self.liq_buffers[sym].append((now, liq_usd, price, liq_type))
+                                        await self.check_shadow_trigger(sym, price, now, liq_type)
                     finally:
                         ping_task.cancel()
 

@@ -422,25 +422,30 @@ class DualExchangeCascadeHunter:
                                     # 가격 변동 확증 검사
                                     await self.check_bybit_confirmation(sym, p_float, now, event_type="TICK")
 
-                            elif topic.startswith("liquidation.") or topic.startswith("allLiquidation."):
-                                sym = topic.split(".")[1]
-                                l_data = data.get("data", {})
-                                side = l_data.get("side") or l_data.get("S")
-                                price = float(l_data.get("price") or l_data.get("p") or 0.0)
-                                size = float(l_data.get("size") or l_data.get("v") or 0.0)
-                                liq_usd = price * size
-                                now = time.time()
+                            elif topic.startswith("allLiquidation.") or topic.startswith("liquidation."):
+                                sym = topic.replace("allLiquidation.", "").replace("liquidation.", "")
+                                raw_data = data.get("data", [])
+                                data_list = [raw_data] if isinstance(raw_data, dict) else raw_data
 
-                                is_long_liq = (side == "Sell") or (side == "Buy" and "allLiquidation" in topic)
-                                liq_side = "Sell" if is_long_liq else "Buy"
+                                for l_data in data_list:
+                                    side = l_data.get("side") or l_data.get("S")
+                                    price = float(l_data.get("price") or l_data.get("p") or 0.0)
+                                    size = float(l_data.get("size") or l_data.get("v") or 0.0)
+                                    liq_usd = price * size
+                                    now = time.time()
 
-                                if sym in self.symbol_configs:
-                                    if sym not in self.bybit_liq_buffers:
-                                        self.bybit_liq_buffers[sym] = deque(maxlen=300)
-                                    self.bybit_liq_buffers[sym].append((now, liq_usd, price, liq_side))
-                                    self.last_liq_event_time = now
-                                    # Bybit 소액 청산 확증 검사
-                                    await self.check_bybit_confirmation(sym, price, now, event_type="LIQ", liq_usd=liq_usd, liq_side=liq_side)
+                                    # Bybit v5: 'Buy' indicates bankrupt Long position (forced sell) -> 숏 진입 기회
+                                    #           'Sell' indicates bankrupt Short position (forced buy) -> 롱 진입 기회
+                                    is_long_liq = (side == "Buy")
+                                    liq_side = "Sell" if is_long_liq else "Buy"
+
+                                    if sym in self.symbol_configs:
+                                        if sym not in self.bybit_liq_buffers:
+                                            self.bybit_liq_buffers[sym] = deque(maxlen=300)
+                                        self.bybit_liq_buffers[sym].append((now, liq_usd, price, liq_side))
+                                        self.last_liq_event_time = now
+                                        # Bybit 소액 청산 확증 검사
+                                        await self.check_bybit_confirmation(sym, price, now, event_type="LIQ", liq_usd=liq_usd, liq_side=liq_side)
                     finally:
                         ping_task.cancel()
 
@@ -450,7 +455,7 @@ class DualExchangeCascadeHunter:
 
     async def sync_bybit_subscriptions(self):
         if not self.bybit_ws_conn: return
-        target = set([f"liquidation.{s}" for s in self.monitored_symbols] + [f"tickers.{s}" for s in self.monitored_symbols])
+        target = set([f"allLiquidation.{s}" for s in self.monitored_symbols] + [f"tickers.{s}" for s in self.monitored_symbols])
         to_sub = list(target - self.bybit_subscribed_topics)
         to_unsub = list(self.bybit_subscribed_topics - target)
 
