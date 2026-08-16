@@ -142,6 +142,7 @@ export class RadarComponent {
     if (!targetFeed) return;
 
     const row = document.createElement('div');
+    const isCascade = event.is_cascade || false;
     const isLong = event.pos_side === 'long' || event.side === 'sell';
     const sideText = isLong ? 'LONG LIQ' : 'SHORT LIQ';
     const rowClass = isLong ? 'long-liq' : 'short-liq';

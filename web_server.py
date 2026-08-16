@@ -652,6 +652,28 @@ class InMemoryLiquidationManager:
             "server_time": time.time()
         }
 
+    def get_recent_liquidations(self, limit: int = 60, symbol: str = None) -> List[Dict[str, Any]]:
+        where = f"WHERE symbol = '{symbol}'" if symbol else ""
+        sql = f"""
+            SELECT 
+                exchange,
+                symbol,
+                CASE WHEN side = 2 THEN 'Buy' ELSE 'Sell' END as side,
+                CASE WHEN side = 2 THEN 'long' ELSE 'short' END as pos_side,
+                price,
+                size as amount,
+                notional_usd,
+                epoch(exec_time) * 1000 as timestamp
+            FROM liquidations {where}
+            ORDER BY exec_time DESC
+            LIMIT {limit};
+        """
+        try:
+            return self.inmem_conn.execute(sql).df().to_dict(orient='records')
+        except Exception as e:
+            logger.error(f"get_recent_liquidations 에러: {e}")
+            return []
+
 
 class CVDSlopeTracker:
     """
@@ -1103,13 +1125,14 @@ class CascadeTradingServer:
         try:
             balance = await asyncio.to_thread(self.trader.get_wallet_balance)
             positions = await asyncio.to_thread(self.trader.get_positions)
+            recent_liqs = self.liq_manager.get_recent_liquidations(limit=60)
             await ws.send_str(orjson.dumps({
                 "type": "SNAPSHOT",
                 "balance": balance,
                 "positions": positions,
                 "prices": self.latest_prices,
                 "armed": self.armed_status,
-                "recent_liqs": sorted([x for dq in self.recent_liquidations_by_sym.values() for x in dq], key=lambda x: x.get('timestamp', 0))[-30:],
+                "recent_liqs": recent_liqs,
                 "auto_trade": self.auto_trade_enabled
             }).decode('utf-8'))
         except Exception:
@@ -1151,8 +1174,8 @@ class CascadeTradingServer:
 
         while self.is_running:
             try:
-                # 바이낸스 + 바이비트 2개 거래소 청산 감시 ($50 이상)
-                async with LiquidationStream(exchanges=["binance", "bybit"], min_notional_usd=50.0) as stream:
+                # 바이낸스 + 바이비트 2개 거래소 청산 감시 ($5 이상 전수 수집)
+                async with LiquidationStream(exchanges=["binance", "bybit"], min_notional_usd=5.0) as stream:
                     logger.info("⚡ [crypto_liquidation] 바이낸스 & 바이비트 청산 스트림 가동 (TOP 20 전용)!")
                     async for event in stream:
                         if not self.is_running: break
