@@ -180,6 +180,10 @@ class CascadeTradingApp {
         }
         break;
 
+      case 'POSITION_TIMEOUT':
+        this.terminal.showToast(`⏱️ [45초 안전 타임아웃] ${msg.symbol} 제한시간 경과로 시장가 자동 종료!`, 'warn');
+        break;
+
       case 'CVD_BATCH':
         this.chart.onCvdBatch(msg.items, msg.time);
         break;

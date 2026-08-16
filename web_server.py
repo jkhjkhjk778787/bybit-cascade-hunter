@@ -217,21 +217,24 @@ class BybitTradingService:
 
         return self._request("POST", "/v5/order/create", order_params)
 
+    def close_position(self, symbol: str, side: str, size: float) -> Dict[str, Any]:
+        close_side = "Sell" if side == "Buy" else "Buy"
+        return self._request("POST", "/v5/order/create", {
+            "category": "linear",
+            "symbol": symbol,
+            "side": close_side,
+            "orderType": "Market",
+            "qty": str(size),
+            "reduceOnly": True,
+            "timeInForce": "IOC"
+        })
+
     def close_all_positions(self) -> List[Dict[str, Any]]:
         positions = self.get_positions()
         results = []
         for p in positions:
             sym = p["symbol"]
-            side = "Sell" if p["side"] == "Buy" else "Buy"
-            res = self._request("POST", "/v5/order/create", {
-                "category": "linear",
-                "symbol": sym,
-                "side": side,
-                "orderType": "Market",
-                "qty": str(p["size"]),
-                "reduceOnly": True,
-                "timeInForce": "IOC"
-            })
+            res = self.close_position(sym, p["side"], float(p["size"]))
             results.append({"symbol": sym, "result": res})
         return results
 
@@ -280,6 +283,7 @@ class CascadeTradingServer:
 
         self.ticker_ws = None
         self._cvd_deltas: Dict[str, Dict[str, float]] = {}
+        self.position_entry_times: Dict[str, float] = {}
         # 초기 기본 20개 동시 상장 심볼
         self.top20_symbols: List[str] = [
             "BTCUSDT", "ETHUSDT", "SOLUSDT", "COWUSDT", "CYSUSDT",
@@ -489,6 +493,10 @@ class CascadeTradingServer:
                 tp_pct,
                 sl_pct
             )
+            if result.get("retCode") == 0:
+                self.position_entry_times[symbol] = time.time()
+                logger.info(f"⚡ [{symbol}] 주문 성공 ➔ 45초 안전 타임아웃 타이머 가동!")
+
             return web.json_response({"success": result.get("retCode") == 0, "response": result})
         except Exception as e:
             return web.json_response({"success": False, "error": str(e)}, status=400)
@@ -818,13 +826,71 @@ class CascadeTradingServer:
                 logger.error(f"CVD 브로드캐스트 에러: {e}")
             await asyncio.sleep(0.1)
 
+    async def run_position_guard_loop(self):
+        """실시간 포지션 감시 및 45초 안전 타임아웃 자동 종료 엔진"""
+        while self.is_running:
+            try:
+                positions = await asyncio.to_thread(self.trader.get_positions)
+                active_symbols_in_pos = set()
+                now = time.time()
+
+                for p in positions:
+                    sym = p.get("symbol")
+                    size = float(p.get("size", 0.0))
+                    if not sym or size <= 0:
+                        continue
+
+                    active_symbols_in_pos.add(sym)
+
+                    # 진입 시각 등록 (최초 감지 또는 updatedTime 기준)
+                    if sym not in self.position_entry_times:
+                        up_time = p.get("updatedTime", 0)
+                        if up_time > 0 and (now - (up_time / 1000.0) < 300.0):
+                            self.position_entry_times[sym] = up_time / 1000.0
+                        else:
+                            self.position_entry_times[sym] = now
+
+                    entry_t = self.position_entry_times[sym]
+                    elapsed = now - entry_t
+
+                    # 45초 초과 시 자동 시장가 종료
+                    if elapsed >= 45.0:
+                        logger.warning(f"⏱️ [{sym}] 45초 안전 타임아웃 도달 ({elapsed:.1f}초 경과) ➔ 시장가 자동 종료 실행!")
+                        close_res = await asyncio.to_thread(self.trader.close_position, sym, p.get("side"), size)
+                        self.position_entry_times.pop(sym, None)
+                        await self.broadcast({
+                            "type": "POSITION_TIMEOUT",
+                            "symbol": sym,
+                            "side": p.get("side"),
+                            "elapsed": round(elapsed, 1),
+                            "result": close_res
+                        })
+
+                # 종료된 포지션의 엔트리 타임 정리
+                for sym in list(self.position_entry_times.keys()):
+                    if sym not in active_symbols_in_pos:
+                        self.position_entry_times.pop(sym, None)
+
+            except Exception as e:
+                logger.error(f"포지션 가드 루프 에러: {e}")
+
+            await asyncio.sleep(0.5)
+
     async def run_account_sync_loop(self):
-        """계좌 잔고 및 포지션 2초 주기 실시간 동기화"""
+        """계좌 잔고 및 포지션 1초 주기 실시간 동기화 (남은 타임아웃 시간 계산 포함)"""
         while self.is_running:
             try:
                 if self.ws_clients:
                     balance = await asyncio.to_thread(self.trader.get_wallet_balance)
                     positions = await asyncio.to_thread(self.trader.get_positions)
+                    now = time.time()
+                    for p in positions:
+                        sym = p.get("symbol")
+                        if sym in self.position_entry_times:
+                            p["entryTime"] = self.position_entry_times[sym]
+                            p["elapsedSec"] = round(now - self.position_entry_times[sym], 1)
+                            p["timeoutSec"] = 45.0
+
                     await self.broadcast({
                         "type": "ACCOUNT_UPDATE",
                         "balance": balance,
@@ -832,7 +898,7 @@ class CascadeTradingServer:
                     })
             except Exception as e:
                 logger.error(f"계좌 동기화 에러: {e}")
-            await asyncio.sleep(2.0)
+            await asyncio.sleep(1.0)
 
     async def _warmup_connections(self):
         try:
@@ -859,7 +925,8 @@ class CascadeTradingServer:
             self.run_bybit_trade_stream(),
             self.run_cvd_broadcast_loop(),
             self.run_top_symbol_scanner(),
-            self.run_account_sync_loop()
+            self.run_account_sync_loop(),
+            self.run_position_guard_loop()
         )
 
 
