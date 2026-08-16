@@ -647,10 +647,19 @@ class InMemoryLiquidationManager:
         }
 
 
+@web.middleware
+async def no_cache_middleware(request: web.Request, handler):
+    resp = await handler(request)
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
+
+
 class CascadeTradingServer:
     def __init__(self, port: int = 8080):
         self.port = port
-        self.app = web.Application()
+        self.app = web.Application(middlewares=[no_cache_middleware])
         self.trader = BybitTradingService(CRED_PATH)
         self.liq_manager = InMemoryLiquidationManager(DB_PATH)
         self.ws_clients: Set[web.WebSocketResponse] = set()
