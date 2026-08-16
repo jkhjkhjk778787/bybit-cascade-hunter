@@ -1151,7 +1151,7 @@ class CascadeTradingServer:
         while self.is_running:
             try:
                 async with ClientSession() as session:
-                    async with session.ws_connect(BYBIT_WS_URL) as ws:
+                    async with session.ws_connect(BYBIT_WS_URL, heartbeat=20.0) as ws:
                         self.ticker_ws = ws
                         sym_list = list(self.subscribed_ticker_symbols)
                         chunk_size = 10
@@ -1241,7 +1241,7 @@ class CascadeTradingServer:
                 symbols = [s.lower() for s in self.top20_symbols]
                 stream_param = "/".join([f"{s}@trade" for s in symbols])
                 url = f"wss://fstream.binance.com/stream?streams={stream_param}"
-                async with self._http_session.ws_connect(url) as ws:
+                async with self._http_session.ws_connect(url, heartbeat=15.0) as ws:
                     logger.info(f"🟡 [Binance Trade Stream] {len(symbols)}개 심볼 실시간 체결(CVD) 연결 완료")
                     async for msg in ws:
                         if not self.is_running: break
@@ -1268,7 +1268,7 @@ class CascadeTradingServer:
         """바이비트 Linear 선물 20종 실시간 체결(publicTrade) 스트림 ➔ CVD 델타 집계"""
         while self.is_running:
             try:
-                async with self._http_session.ws_connect(BYBIT_WS_URL) as ws:
+                async with self._http_session.ws_connect(BYBIT_WS_URL, heartbeat=20.0) as ws:
                     sym_list = list(self.top20_symbols)
                     chunk_size = 10
                     for i in range(0, len(sym_list), chunk_size):
