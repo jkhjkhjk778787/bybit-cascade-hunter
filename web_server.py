@@ -1360,9 +1360,9 @@ class CascadeTradingServer:
                                 delta = -usd if m else usd
 
                                 if sym not in self._cvd_deltas:
-                                    self._cvd_deltas[sym] = {"bin_delta": 0.0, "byb_delta": 0.0, "price": p}
+                                    self._cvd_deltas[sym] = {"bin_delta": 0.0, "byb_delta": 0.0, "bin_price": p, "byb_price": 0.0}
                                 self._cvd_deltas[sym]["bin_delta"] += delta
-                                self._cvd_deltas[sym]["price"] = p
+                                self._cvd_deltas[sym]["bin_price"] = p
             except Exception as e:
                 logger.error(f"Binance Trade Stream 에러: {e} ➔ 3초 후 재연결...")
                 await asyncio.sleep(3)
@@ -1399,9 +1399,9 @@ class CascadeTradingServer:
                                     delta = usd if side == "Buy" else -usd
 
                                     if sym not in self._cvd_deltas:
-                                        self._cvd_deltas[sym] = {"bin_delta": 0.0, "byb_delta": 0.0, "price": p}
+                                        self._cvd_deltas[sym] = {"bin_delta": 0.0, "byb_delta": 0.0, "bin_price": 0.0, "byb_price": p}
                                     self._cvd_deltas[sym]["byb_delta"] += delta
-                                    self._cvd_deltas[sym]["price"] = p
+                                    self._cvd_deltas[sym]["byb_price"] = p
             except Exception as e:
                 logger.error(f"Bybit Trade Stream 에러: {e} ➔ 3초 후 재연결...")
                 await asyncio.sleep(3)
@@ -1409,7 +1409,7 @@ class CascadeTradingServer:
                 self.bybit_trade_ws = None
 
     async def run_cvd_broadcast_loop(self):
-        """100ms 주기로 누적된 Binance & Bybit CVD 델타 일괄(Batch) 브로드캐스트"""
+        """50ms 주기로 누적된 Binance & Bybit CVD 델타 일괄(Batch) 브로드캐스트"""
         while self.is_running:
             try:
                 if self.ws_clients and self._cvd_deltas:
@@ -1424,7 +1424,8 @@ class CascadeTradingServer:
                                 "s": sym,
                                 "b": round(bin_d, 2),
                                 "y": round(byb_d, 2),
-                                "p": d.get("price", 0.0)
+                                "bp": d.get("bin_price", 0.0),
+                                "yp": d.get("byb_price", 0.0)
                             })
                     if batch:
                         await self.broadcast({

@@ -2,10 +2,10 @@
  * Master Application Controller & WebSocket Connection Manager
  */
 
-import { ProChart } from './chart.js?v=20260817_0550';
-import { RadarComponent } from './radar.js?v=20260817_0550';
-import { TerminalComponent } from './terminal.js?v=20260817_0550';
-import { OrderflowComponent } from './orderflow.js?v=20260817_0550';
+import { ProChart } from './chart.js?v=20260817_0613';
+import { RadarComponent } from './radar.js?v=20260817_0613';
+import { TerminalComponent } from './terminal.js?v=20260817_0613';
+import { OrderflowComponent } from './orderflow.js?v=20260817_0613';
 
 class CascadeTradingApp {
   constructor() {
@@ -208,13 +208,16 @@ class CascadeTradingApp {
         this.chart.onCvdBatch(msg.items, msg.time);
         if (msg.items && msg.items.length > 0) {
           msg.items.forEach(item => {
-            if (item.s === this.currentSymbol && item.p > 0) {
-              this.latestPrices[item.s] = item.p;
-              this.chart.onTick({ symbol: item.s, price: item.p, time: msg.time });
-              if (this._priceEl) {
-                this._priceEl.textContent = `$${item.p.toFixed(item.p > 10 ? 2 : item.p > 0.1 ? 4 : 6)}`;
+            if (item.s === this.currentSymbol) {
+              const bybPrice = item.yp > 0 ? item.yp : 0;
+              if (bybPrice > 0) {
+                this.latestPrices[item.s] = bybPrice;
+                this.chart.onTick({ symbol: item.s, price: bybPrice, time: msg.time });
+                if (this._priceEl) {
+                  this._priceEl.textContent = `$${bybPrice.toFixed(bybPrice > 10 ? 2 : bybPrice > 0.1 ? 4 : 6)}`;
+                }
+                this.terminal.updatePrice(bybPrice);
               }
-              this.terminal.updatePrice(item.p);
             }
           });
         }
