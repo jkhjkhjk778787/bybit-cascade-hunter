@@ -183,11 +183,13 @@ export class RadarComponent {
     const row = document.createElement('div');
     const isBuy = event.side === 'buy' || (event.slope_usd_sec || 0) > 0;
     const isTrap = event.insight && event.insight.includes('트랩');
-    const rowClass = isTrap ? 'trap-burst' : (isBuy ? 'buy-burst' : 'sell-burst');
+    const isLeadLag = event.is_lead_lag;
+    const rowClass = isTrap ? 'trap-burst' : (isLeadLag ? 'lead-burst' : (isBuy ? 'buy-burst' : 'sell-burst'));
     const slopeRate = Math.abs(event.slope_usd_sec || 0);
     const sign = (event.slope_usd_sec || 0) >= 0 ? '+' : '-';
     const rateStr = `${sign}$${this._fmtUsd(slopeRate)}/s`;
     const zScore = event.z_score ? `${event.z_score >= 0 ? '+' : ''}${event.z_score}σ` : '';
+    const accelStr = event.accel_ratio ? `🔥${event.accel_ratio}x` : '';
 
     const timeDate = event.time ? new Date(event.time) : new Date();
     const timeStr = timeDate.toTimeString().split(' ')[0];
@@ -199,7 +201,10 @@ export class RadarComponent {
     row.innerHTML = `
       <div class="feed-row-top">
         <span class="feed-sym">${event.symbol}</span>
-        <span class="cvd-rate-badge ${isBuy ? 'buy' : 'sell'}">${rateStr}</span>
+        <div style="display:flex; gap:3px; align-items:center;">
+          ${accelStr ? `<span style="font-size:9px; font-weight:800; color:var(--warn-amber);">${accelStr}</span>` : ''}
+          <span class="cvd-rate-badge ${isBuy ? 'buy' : 'sell'}">${rateStr}</span>
+        </div>
       </div>
       <div class="feed-row-bottom">
         <span class="feed-side" style="color:${isTrap ? 'var(--warn-amber)' : (isBuy ? 'var(--long-green)' : 'var(--short-red)')};">

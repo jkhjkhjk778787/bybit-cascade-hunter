@@ -363,6 +363,12 @@ html, body {
   background: linear-gradient(135deg, hsla(348, 100%, 61%, 0.1) 0%, var(--bg-surface-elevated) 100%);
 }
 
+.feed-column .cvd-peak-row.lead-burst {
+  border-left-color: var(--binance-yellow);
+  background: linear-gradient(135deg, hsla(43, 96%, 58%, 0.16) 0%, var(--bg-surface-elevated) 100%);
+  box-shadow: 0 0 10px hsla(43, 96%, 58%, 0.3);
+}
+
 .feed-column .cvd-peak-row.trap-burst {
   border-left-color: var(--warn-amber);
   background: linear-gradient(135deg, hsla(38, 92%, 52%, 0.18) 0%, var(--bg-surface-elevated) 100%);
