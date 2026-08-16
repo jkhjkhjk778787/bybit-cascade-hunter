@@ -986,7 +986,7 @@ class CascadeTradingServer:
                 elif msg.type == WSMsgType.ERROR:
                     logger.error(f"WS 에러: {ws.exception()}")
         finally:
-            self.ws_clients.remove(ws)
+            self.ws_clients.discard(ws)
             logger.info(f"🌐 [Web UI 단절] 클라이언트 퇴장 (남은 접속자: {len(self.ws_clients)}명)")
 
         return ws
