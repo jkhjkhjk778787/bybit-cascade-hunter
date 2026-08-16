@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Cascade Pro Trading Suite - Real-Time Liquidation & Scalping Terminal</title>
   <meta name="description" content="HFT-grade dual exchange liquidation cascade hunter, autonomous backtesting tuner, and 1-click semi-auto execution trading suite.">
-  <link rel="stylesheet" href="/css/style.css?v=20260817_0437">
+  <link rel="stylesheet" href="/css/style.css?v=20260817_0446">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
@@ -72,34 +72,50 @@
     <!-- 2. MAIN TRADING TERMINAL WORKSPACE -->
     <main class="main-workspace" id="viewTrading">
       
-      <!-- LEFT PANE: DUAL EXCHANGE LIQUIDATION & CASCADE RADAR -->
+      <!-- LEFT PANE: DUAL EXCHANGE LIQUIDATION & CVD SLOPE MOMENTUM RADAR -->
       <aside class="left-pane">
-        <!-- 1. Cross-Exchange Cascade Burst Radar -->
-        <section class="radar-subpanel" style="flex: 0 0 auto; max-height: 45%;">
-          <div class="panel-header">
-            <span class="panel-title">💥 연쇄 폭포수 전이 레이더</span>
+        <!-- 1. TOP HALF: Cross-Exchange Cascade & Liquidation Feeds -->
+        <section class="radar-subpanel half-subpanel" id="paneLiquidationRadar">
+          <div class="panel-header" style="flex-shrink:0;">
+            <span class="panel-title">💥 연쇄 폭포수 청산 레이더</span>
             <span style="font-size:10px; color:var(--warn-amber);">Binance ➔ Bybit</span>
           </div>
-          <div class="panel-body" id="cascadeList" style="display:flex; flex-direction:column; gap:6px;">
+          <div class="panel-body" id="cascadeList" style="flex:0 0 auto; max-height:100px; display:flex; flex-direction:column; gap:4px; padding:4px 8px;">
             <!-- Dynamic Cascade Burst Cards inserted here -->
-            <div id="cascadePlaceholder" style="color:var(--text-muted); font-size:11px; padding:12px; text-align:center;">
+            <div id="cascadePlaceholder" style="color:var(--text-muted); font-size:10px; padding:4px; text-align:center;">
               연쇄 청산 감시 중 (바이낸스 도화선 ➔ 바이비트 전이 포착)
             </div>
           </div>
-        </section>
-
-        <!-- 2. Dual-Exchange Concurrent Liquidation Feeds (Side-by-Side Simultaneous View) -->
-        <section class="radar-subpanel" style="flex: 1; display:flex; flex-direction:column; overflow:hidden;">
-          <div class="panel-header" style="display:grid; grid-template-columns: 1fr 1fr; padding: 6px 10px; gap: 8px;">
+          <div class="panel-header feed-sub-header">
             <span class="panel-title" style="font-size:11px; color:var(--binance-yellow);">🟡 Binance 청산</span>
             <span class="panel-title" style="font-size:11px; color:var(--bybit-gold);">🟠 Bybit 청산</span>
           </div>
           <div class="dual-feed-columns">
             <div id="binanceFeedList" class="feed-column">
-              <!-- Binance Liquidation Rows (Live Stream) -->
+              <!-- Binance Liquidation Rows -->
             </div>
             <div id="bybitFeedList" class="feed-column">
-              <!-- Bybit Liquidation Rows (Live Stream) -->
+              <!-- Bybit Liquidation Rows -->
+            </div>
+          </div>
+        </section>
+
+        <!-- 2. BOTTOM HALF: CVD Slope & Momentum Burst Radar -->
+        <section class="radar-subpanel half-subpanel" id="paneCvdSlopeRadar">
+          <div class="panel-header" style="flex-shrink:0;">
+            <span class="panel-title">🌊 CVD 급격한 기울기 피크</span>
+            <span style="font-size:10px; color:var(--brand-cyan);">3s 가속도 이상 폭발</span>
+          </div>
+          <div class="panel-header feed-sub-header">
+            <span class="panel-title" style="font-size:11px; color:var(--binance-yellow);">🟡 Binance CVD 피크</span>
+            <span class="panel-title" style="font-size:11px; color:var(--bybit-gold);">🟠 Bybit CVD 피크</span>
+          </div>
+          <div class="dual-feed-columns">
+            <div id="binanceCvdPeakList" class="feed-column">
+              <!-- Binance CVD Slope Burst Rows -->
+            </div>
+            <div id="bybitCvdPeakList" class="feed-column">
+              <!-- Bybit CVD Slope Burst Rows -->
             </div>
           </div>
         </section>
@@ -413,6 +429,6 @@
   </div>
 
   <!-- Master Application Script -->
-  <script type="module" src="/js/app.js?v=20260817_0437"></script>
+  <script type="module" src="/js/app.js?v=20260817_0446"></script>
 </body>
 </html>

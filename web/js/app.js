@@ -2,11 +2,11 @@
  * Master Application Controller & WebSocket Connection Manager
  */
 
-import { ProChart } from './chart.js?v=20260817_0437';
-import { RadarComponent } from './radar.js?v=20260817_0437';
-import { TerminalComponent } from './terminal.js?v=20260817_0437';
-import { OrderflowComponent } from './orderflow.js?v=20260817_0437';
-import { LiquidationsComponent } from './liquidations.js?v=20260817_0437';
+import { ProChart } from './chart.js?v=20260817_0446';
+import { RadarComponent } from './radar.js?v=20260817_0446';
+import { TerminalComponent } from './terminal.js?v=20260817_0446';
+import { OrderflowComponent } from './orderflow.js?v=20260817_0446';
+import { LiquidationsComponent } from './liquidations.js?v=20260817_0446';
 
 class CascadeTradingApp {
   constructor() {
@@ -23,7 +23,7 @@ class CascadeTradingApp {
 
     // Components
     this.chart = new ProChart('centerLiqCanvas', 'tick1sCanvas', 'cvdCanvas');
-    this.radar = new RadarComponent('cascadeList', 'binanceFeedList', 'bybitFeedList');
+    this.radar = new RadarComponent('cascadeList', 'binanceFeedList', 'bybitFeedList', 'binanceCvdPeakList', 'bybitCvdPeakList');
     this.terminal = new TerminalComponent(this);
     this.orderflow = new OrderflowComponent('alertFeed');
     this.liquidations = new LiquidationsComponent(this);
@@ -360,6 +360,12 @@ class CascadeTradingApp {
           if (this.currentSymbol === sym) {
             this.renderTriggerHistory(sym);
           }
+        }
+        break;
+
+      case 'CVD_SLOPE_PEAK':
+        if (msg.peak) {
+          this.radar.addCvdSlopePeak(msg.peak);
         }
         break;
 

@@ -286,13 +286,29 @@ html, body {
   flex-direction: column;
   overflow: hidden;
   gap: 1px;
+  height: 100%;
 }
 
-.radar-subpanel {
+.radar-subpanel.half-subpanel {
+  flex: 1 1 50%;
+  min-height: 0;
   background-color: var(--bg-surface);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+#paneCvdSlopeRadar {
+  border-top: 2px solid var(--border-subtle);
+}
+
+.feed-sub-header {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 4px 8px;
+  gap: 6px;
+  background: var(--bg-surface-elevated);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 /* Dual Side-by-Side Liquidation Columns */
@@ -314,6 +330,61 @@ html, body {
   gap: 4px;
   padding: 6px 4px;
   background-color: var(--bg-surface);
+}
+
+/* CVD Slope Peak Card */
+.feed-column .cvd-peak-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 5px 7px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface-elevated);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  border-left: 3px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.feed-column .cvd-peak-row:hover {
+  background: var(--bg-surface-subtle);
+  transform: translateX(1px);
+  border-color: var(--border-strong);
+}
+
+.feed-column .cvd-peak-row.buy-burst {
+  border-left-color: var(--long-green);
+  background: linear-gradient(135deg, hsla(158, 100%, 41%, 0.1) 0%, var(--bg-surface-elevated) 100%);
+}
+
+.feed-column .cvd-peak-row.sell-burst {
+  border-left-color: var(--short-red);
+  background: linear-gradient(135deg, hsla(348, 100%, 61%, 0.1) 0%, var(--bg-surface-elevated) 100%);
+}
+
+.feed-column .cvd-peak-row.trap-burst {
+  border-left-color: var(--warn-amber);
+  background: linear-gradient(135deg, hsla(38, 92%, 52%, 0.18) 0%, var(--bg-surface-elevated) 100%);
+  box-shadow: 0 0 8px hsla(38, 92%, 52%, 0.3);
+}
+
+.cvd-rate-badge {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+}
+
+.cvd-rate-badge.buy {
+  color: var(--long-green);
+  background: hsla(158, 100%, 41%, 0.18);
+}
+
+.cvd-rate-badge.sell {
+  color: var(--short-red);
+  background: hsla(348, 100%, 61%, 0.18);
 }
 
 /* Compact Liquidation Card inside Column */

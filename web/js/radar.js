@@ -4,23 +4,27 @@
  */
 
 export class RadarComponent {
-  constructor(cascadeListId, binanceFeedId, bybitFeedId) {
+  constructor(cascadeListId, binanceFeedId, bybitFeedId, binanceCvdPeakId, bybitCvdPeakId) {
     this.cascadeListEl = document.getElementById(cascadeListId);
     this.binanceFeedEl = document.getElementById(binanceFeedId);
     this.bybitFeedEl = document.getElementById(bybitFeedId);
+    this.binanceCvdPeakEl = document.getElementById(binanceCvdPeakId || 'binanceCvdPeakList');
+    this.bybitCvdPeakEl = document.getElementById(bybitCvdPeakId || 'bybitCvdPeakList');
 
     this.cascadeCards = new Map(); // symbol -> DOMElement
     this._timerRunning = false;
 
-    // Event delegation for liquidation feeds
+    // Event delegation for liquidation feeds & CVD slope feeds
     const handleFeedClick = e => {
-      const row = e.target.closest('.liq-row');
+      const row = e.target.closest('.liq-row, .cvd-peak-row');
       if (row && row.dataset.symbol && window.app) {
         window.app.selectSymbol(row.dataset.symbol);
       }
     };
     if (this.binanceFeedEl) this.binanceFeedEl.addEventListener('click', handleFeedClick);
     if (this.bybitFeedEl) this.bybitFeedEl.addEventListener('click', handleFeedClick);
+    if (this.binanceCvdPeakEl) this.binanceCvdPeakEl.addEventListener('click', handleFeedClick);
+    if (this.bybitCvdPeakEl) this.bybitCvdPeakEl.addEventListener('click', handleFeedClick);
   }
 
   _startTimerIfNeeded() {
@@ -169,5 +173,53 @@ export class RadarComponent {
     while (targetFeed.children.length > 50) {
       targetFeed.removeChild(targetFeed.lastChild);
     }
+  }
+
+  addCvdSlopePeak(event) {
+    const exch = (event.exchange || 'binance').toLowerCase();
+    const targetFeed = exch === 'binance' ? this.binanceCvdPeakEl : this.bybitCvdPeakEl;
+    if (!targetFeed) return;
+
+    const row = document.createElement('div');
+    const isBuy = event.side === 'buy' || (event.slope_usd_sec || 0) > 0;
+    const isTrap = event.insight && event.insight.includes('트랩');
+    const rowClass = isTrap ? 'trap-burst' : (isBuy ? 'buy-burst' : 'sell-burst');
+    const slopeRate = Math.abs(event.slope_usd_sec || 0);
+    const sign = (event.slope_usd_sec || 0) >= 0 ? '+' : '-';
+    const rateStr = `${sign}$${this._fmtUsd(slopeRate)}/s`;
+    const zScore = event.z_score ? `${event.z_score >= 0 ? '+' : ''}${event.z_score}σ` : '';
+
+    const timeDate = event.time ? new Date(event.time) : new Date();
+    const timeStr = timeDate.toTimeString().split(' ')[0];
+
+    row.className = `cvd-peak-row ${rowClass}`;
+    row.style.cursor = 'pointer';
+    row.title = `${event.symbol} (${exch.toUpperCase()}) CVD 기울기 피크 (${rateStr}) - 클릭 시 차트 즉시 전환`;
+    row.dataset.symbol = event.symbol;
+    row.innerHTML = `
+      <div class="feed-row-top">
+        <span class="feed-sym">${event.symbol}</span>
+        <span class="cvd-rate-badge ${isBuy ? 'buy' : 'sell'}">${rateStr}</span>
+      </div>
+      <div class="feed-row-bottom">
+        <span class="feed-side" style="color:${isTrap ? 'var(--warn-amber)' : (isBuy ? 'var(--long-green)' : 'var(--short-red)')};">
+          ${event.insight || (isBuy ? '🚀 매수 가속' : '🔴 덤핑 가속')} ${zScore ? `(${zScore})` : ''}
+        </span>
+        <span class="feed-time">${timeStr}</span>
+      </div>
+    `;
+
+    targetFeed.prepend(row);
+
+    // Keep max 50 rows per column
+    while (targetFeed.children.length > 50) {
+      targetFeed.removeChild(targetFeed.lastChild);
+    }
+  }
+
+  _fmtUsd(v) {
+    if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+    if (v >= 1e3) return (v / 1e3).toFixed(1) + 'k';
+    return Math.round(v).toString();
   }
 }
