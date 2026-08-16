@@ -16,6 +16,7 @@
 
 import asyncio
 import json
+import orjson
 import logging
 import os
 import time
@@ -243,7 +244,7 @@ class ShadowIncubator:
                         async for message in ws:
                             if not self.is_running:
                                 break
-                            data = json.loads(message)
+                            data = orjson.loads(message)
                             topic = data.get("topic", "")
 
                             if topic.startswith("tickers."):

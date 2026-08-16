@@ -35,6 +35,9 @@ class TradeDBManager:
     def __init__(self, db_path: str):
         self.db_path = db_path
         self.conn = duckdb.connect(database=self.db_path)
+        self.conn.execute("PRAGMA threads=2;")
+        self.conn.execute("PRAGMA memory_limit='400MB';")
+        self.conn.execute("PRAGMA checkpoint_threshold='64MB';")
         self._init_schema()
 
     def _init_schema(self):
@@ -385,12 +388,12 @@ class IntegratedMarketCollector:
                                     exec_ts
                                 )
 
-                                # 메모리 통계 갱신
+                                # 메모리 통계 갱신 (CPU 최적화: 핫 루프에서 strftime 배제)
                                 s_stat = self.symbol_stats[symbol]
                                 s_stat["ticks"] += 1
                                 s_stat["volume"] += size
                                 s_stat["last_price"] = price
-                                s_stat["last_time"] = exec_ts.strftime("%Y-%m-%d %H:%M:%S")
+                                s_stat["last_ts"] = t.get("T", 0)
 
                                 try:
                                     self.queue.put_nowait(record)
@@ -409,7 +412,7 @@ class IntegratedMarketCollector:
                 await asyncio.sleep(3)
 
     async def status_dump_worker(self):
-        """1초마다 status.json에 메모리 스냅샷 덤프 (0.1ms 소요)"""
+        """3초마다 status.json에 메모리 스냅샷 덤프 (0.1ms 소요)"""
         while self.is_running:
             try:
                 db_size_mb = os.path.getsize(config.DB_PATH) / (1024 * 1024) if os.path.exists(config.DB_PATH) else 0.0
@@ -427,7 +430,7 @@ class IntegratedMarketCollector:
                             "ticks": stat["ticks"],
                             "volume": round(stat["volume"], 2),
                             "last_price": stat["last_price"],
-                            "last_time": stat["last_time"],
+                            "last_time": datetime.fromtimestamp(stat["last_ts"] / 1000.0).strftime("%Y-%m-%d %H:%M:%S") if stat.get("last_ts") else "",
                             "liq_count": self.liq_stats[sym]["count"],
                             "long_liq_usd": round(self.liq_stats[sym]["long_liq_usd"], 2),
                             "short_liq_usd": round(self.liq_stats[sym]["short_liq_usd"], 2),

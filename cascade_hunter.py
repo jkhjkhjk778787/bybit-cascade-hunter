@@ -15,6 +15,7 @@
 
 import asyncio
 import json
+import orjson
 import logging
 import math
 import os
@@ -344,7 +345,7 @@ class DualExchangeCascadeHunter:
                     logger.info("🟡 [Binance WS] 청산 도화선 감시망 연결 성공!")
                     async for message in ws:
                         if not self.is_running: break
-                        data = json.loads(message)
+                        data = orjson.loads(message)
                         event = data.get("o", {})
                         sym = event.get("s", "")
                         side = event.get("S", "")  # "SELL" (Long Liq)
@@ -401,7 +402,7 @@ class DualExchangeCascadeHunter:
                     try:
                         async for message in ws:
                             if not self.is_running: break
-                            data = json.loads(message)
+                            data = orjson.loads(message)
                             topic = data.get("topic", "")
 
                             if topic.startswith("tickers."):
@@ -487,7 +488,7 @@ class DualExchangeCascadeHunter:
 
                 # binance_armed 만료 키 주기적 청소 (TTL Cleaner)
                 now = time.time()
-                expired_keys = [k for k, v in self.binance_armed.items() if now > v]
+                expired_keys = [k for k, v in self.binance_armed.items() if now > (v.get("expires", 0) if isinstance(v, dict) else v)]
                 for k in expired_keys:
                     del self.binance_armed[k]
 
