@@ -101,6 +101,39 @@ export class ProChart {
     this._requestRender(true, true, true);
   }
 
+  onCvdBatch(items, timeSec) {
+    if (!items || !items.length) return;
+    const target = items.find(it => it.s === this.symbol);
+    if (!target) return;
+    const now = timeSec ? Math.floor(timeSec * 1000) : Date.now();
+
+    this.binanceCvd += (target.b || 0.0);
+    this.bybitCvd += (target.y || 0.0);
+
+    this.cvdPoints.push({
+      t: now,
+      bin: this.binanceCvd,
+      byb: this.bybitCvd
+    });
+
+    const cutoff = now - 180_000;
+    const idx = this.cvdPoints.findIndex(p => p.t >= cutoff);
+    if (idx > 0) this.cvdPoints.splice(0, idx);
+
+    if (this._cvdBinLegendEl) {
+      const bSign = this.binanceCvd >= 0 ? '+' : '';
+      this._cvdBinLegendEl.textContent = `BIN: ${bSign}$${this._fmtUsd(this.binanceCvd)}`;
+      this._cvdBinLegendEl.style.color = this.binanceCvd >= 0 ? 'var(--binance-yellow)' : '#e74c6b';
+    }
+    if (this._cvdBybLegendEl) {
+      const ySign = this.bybitCvd >= 0 ? '+' : '';
+      this._cvdBybLegendEl.textContent = `BYB: ${ySign}$${this._fmtUsd(this.bybitCvd)}`;
+      this._cvdBybLegendEl.style.color = this.bybitCvd >= 0 ? 'var(--bybit-gold)' : '#e74c6b';
+    }
+
+    this._requestRender(false, false, true);
+  }
+
   onCvdUpdate(msg) {
     if (msg.symbol !== this.symbol) return;
     const now = msg.time ? Math.floor(msg.time * 1000) : Date.now();

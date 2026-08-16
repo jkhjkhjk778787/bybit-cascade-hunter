@@ -302,6 +302,12 @@ class CascadeTradingServer:
         self.top20_symbols = list(new_top20)
         self.subscribed_ticker_symbols = set(new_top20)
 
+        # 탈락 심볼 메모리 컬렉션 정리 (Memory Leak 방지)
+        for s in dropped:
+            self._cvd_deltas.pop(s, None)
+            self.recent_liquidations_by_sym.pop(s, None)
+            self.latest_prices.pop(s, None)
+
         if self.ticker_ws and not self.ticker_ws.closed:
             if dropped:
                 try:
@@ -725,26 +731,25 @@ class CascadeTradingServer:
                 symbols = [s.lower() for s in self.top20_symbols]
                 stream_param = "/".join([f"{s}@trade" for s in symbols])
                 url = f"wss://fstream.binance.com/stream?streams={stream_param}"
-                async with ClientSession() as session:
-                    async with session.ws_connect(url) as ws:
-                        logger.info(f"🟡 [Binance Trade Stream] {len(symbols)}개 심볼 실시간 체결(CVD) 연결 완료")
-                        async for msg in ws:
-                            if not self.is_running: break
-                            if msg.type == WSMsgType.TEXT:
-                                data = orjson.loads(msg.data)
-                                t = data.get("data", {})
-                                sym = t.get("s")
-                                if sym:
-                                    p = float(t.get("p", 0.0))
-                                    q = float(t.get("q", 0.0))
-                                    m = t.get("m", False)  # True means market sell
-                                    usd = p * q
-                                    delta = -usd if m else usd
+                async with self._http_session.ws_connect(url) as ws:
+                    logger.info(f"🟡 [Binance Trade Stream] {len(symbols)}개 심볼 실시간 체결(CVD) 연결 완료")
+                    async for msg in ws:
+                        if not self.is_running: break
+                        if msg.type == WSMsgType.TEXT:
+                            data = orjson.loads(msg.data)
+                            t = data.get("data", {})
+                            sym = t.get("s")
+                            if sym:
+                                p = float(t.get("p", 0.0))
+                                q = float(t.get("q", 0.0))
+                                m = t.get("m", False)  # True means market sell
+                                usd = p * q
+                                delta = -usd if m else usd
 
-                                    if sym not in self._cvd_deltas:
-                                        self._cvd_deltas[sym] = {"bin_delta": 0.0, "byb_delta": 0.0, "price": p}
-                                    self._cvd_deltas[sym]["bin_delta"] += delta
-                                    self._cvd_deltas[sym]["price"] = p
+                                if sym not in self._cvd_deltas:
+                                    self._cvd_deltas[sym] = {"bin_delta": 0.0, "byb_delta": 0.0, "price": p}
+                                self._cvd_deltas[sym]["bin_delta"] += delta
+                                self._cvd_deltas[sym]["price"] = p
             except Exception as e:
                 logger.error(f"Binance Trade Stream 에러: {e} ➔ 3초 후 재연결...")
                 await asyncio.sleep(3)
@@ -753,58 +758,62 @@ class CascadeTradingServer:
         """바이비트 Linear 선물 20종 실시간 체결(publicTrade) 스트림 ➔ CVD 델타 집계"""
         while self.is_running:
             try:
-                async with ClientSession() as session:
-                    async with session.ws_connect(BYBIT_WS_URL) as ws:
-                        sym_list = list(self.top20_symbols)
-                        chunk_size = 10
-                        for i in range(0, len(sym_list), chunk_size):
-                            chunk = [f"publicTrade.{s}" for s in sym_list[i:i + chunk_size]]
-                            await ws.send_str(orjson.dumps({"op": "subscribe", "args": chunk}).decode('utf-8'))
-                            if i + chunk_size < len(sym_list):
-                                await asyncio.sleep(0.05)
-                        logger.info(f"🟠 [Bybit Trade Stream] {len(sym_list)}개 심볼 실시간 체결(CVD) 연결 완료")
+                async with self._http_session.ws_connect(BYBIT_WS_URL) as ws:
+                    sym_list = list(self.top20_symbols)
+                    chunk_size = 10
+                    for i in range(0, len(sym_list), chunk_size):
+                        chunk = [f"publicTrade.{s}" for s in sym_list[i:i + chunk_size]]
+                        await ws.send_str(orjson.dumps({"op": "subscribe", "args": chunk}).decode('utf-8'))
+                        if i + chunk_size < len(sym_list):
+                            await asyncio.sleep(0.05)
+                    logger.info(f"🟠 [Bybit Trade Stream] {len(sym_list)}개 심볼 실시간 체결(CVD) 연결 완료")
 
-                        async for msg in ws:
-                            if not self.is_running: break
-                            if msg.type == WSMsgType.TEXT:
-                                data = orjson.loads(msg.data)
-                                topic = data.get("topic", "")
-                                if topic.startswith("publicTrade."):
-                                    sym = topic.replace("publicTrade.", "")
-                                    for t in data.get("data", []):
-                                        p = float(t.get("p", 0.0))
-                                        v = float(t.get("v", 0.0))
-                                        side = t.get("S", "Buy")
-                                        usd = p * v
-                                        delta = usd if side == "Buy" else -usd
+                    async for msg in ws:
+                        if not self.is_running: break
+                        if msg.type == WSMsgType.TEXT:
+                            data = orjson.loads(msg.data)
+                            topic = data.get("topic", "")
+                            if topic.startswith("publicTrade."):
+                                sym = topic.replace("publicTrade.", "")
+                                for t in data.get("data", []):
+                                    p = float(t.get("p", 0.0))
+                                    v = float(t.get("v", 0.0))
+                                    side = t.get("S", "Buy")
+                                    usd = p * v
+                                    delta = usd if side == "Buy" else -usd
 
-                                        if sym not in self._cvd_deltas:
-                                            self._cvd_deltas[sym] = {"bin_delta": 0.0, "byb_delta": 0.0, "price": p}
-                                        self._cvd_deltas[sym]["byb_delta"] += delta
-                                        self._cvd_deltas[sym]["price"] = p
+                                    if sym not in self._cvd_deltas:
+                                        self._cvd_deltas[sym] = {"bin_delta": 0.0, "byb_delta": 0.0, "price": p}
+                                    self._cvd_deltas[sym]["byb_delta"] += delta
+                                    self._cvd_deltas[sym]["price"] = p
             except Exception as e:
                 logger.error(f"Bybit Trade Stream 에러: {e} ➔ 3초 후 재연결...")
                 await asyncio.sleep(3)
 
     async def run_cvd_broadcast_loop(self):
-        """100ms 주기로 누적된 Binance & Bybit CVD 델타 브로드캐스트 (초저지연)"""
+        """100ms 주기로 누적된 Binance & Bybit CVD 델타 일괄(Batch) 브로드캐스트"""
         while self.is_running:
             try:
                 if self.ws_clients and self._cvd_deltas:
+                    batch = []
                     for sym, d in list(self._cvd_deltas.items()):
                         bin_d = d["bin_delta"]
                         byb_d = d["byb_delta"]
                         if bin_d != 0.0 or byb_d != 0.0:
                             d["bin_delta"] = 0.0
                             d["byb_delta"] = 0.0
-                            await self.broadcast({
-                                "type": "CVD_UPDATE",
-                                "symbol": sym,
-                                "bin_delta": round(bin_d, 2),
-                                "byb_delta": round(byb_d, 2),
-                                "price": d.get("price", 0.0),
-                                "time": time.time()
+                            batch.append({
+                                "s": sym,
+                                "b": round(bin_d, 2),
+                                "y": round(byb_d, 2),
+                                "p": d.get("price", 0.0)
                             })
+                    if batch:
+                        await self.broadcast({
+                            "type": "CVD_BATCH",
+                            "items": batch,
+                            "time": time.time()
+                        })
             except Exception as e:
                 logger.error(f"CVD 브로드캐스트 에러: {e}")
             await asyncio.sleep(0.1)

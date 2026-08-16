@@ -180,6 +180,10 @@ class CascadeTradingApp {
         }
         break;
 
+      case 'CVD_BATCH':
+        this.chart.onCvdBatch(msg.items, msg.time);
+        break;
+
       case 'CVD_UPDATE':
         this.chart.onCvdUpdate(msg);
         break;
