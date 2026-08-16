@@ -132,6 +132,7 @@ def run_continuous_two_stage_tuning() -> Dict[str, Any]:
         l_ts = s_l['ts_ms'].values
         l_ex = s_l['exchange'].values
         l_usd = s_l['notional_usd'].values
+        l_side = s_l['side'].values if 'side' in s_l.columns else np.full(len(s_l), 2)
 
         best_pnl = -999.0
         best_setting = None
@@ -145,30 +146,46 @@ def run_continuous_two_stage_tuning() -> Dict[str, Any]:
                             trades = []
                             last_trade_end_ts = 0
                             bin_armed_until = 0
+                            armed_target_side = "Sell"
 
                             for i in range(len(s_l)):
                                 ts_i = l_ts[i]
                                 ex_i = l_ex[i]
                                 usd_i = l_usd[i]
+                                side_i = l_side[i] # 2: Long Liq -> Short Scalp, 1: Short Liq -> Long Scalp
 
                                 # 1. 바이낸스 도화선 장전
                                 if ex_i == 'binance' and usd_i >= bin_arm_usd:
                                     bin_armed_until = ts_i + int(arm_sec * 1000)
+                                    armed_target_side = "Sell" if side_i == 2 else "Buy"
 
                                 # 2. 바이비트 확증
                                 is_confirmed = False
+                                current_target_side = armed_target_side
+
                                 if ts_i <= bin_armed_until:
-                                    if ex_i == 'bybit' and usd_i >= by_conf_usd:
-                                        is_confirmed = True
-                                    p_idx = np.searchsorted(t_ts, ts_i)
-                                    p_pre_idx = np.searchsorted(t_ts, ts_i - 3000)
-                                    if p_idx < len(t_px) and p_pre_idx < len(t_px) and p_pre_idx < p_idx:
-                                        dp = (t_px[p_pre_idx] - t_px[p_idx]) / t_px[p_pre_idx] * 100.0
-                                        if dp >= by_conf_drop:
+                                    if current_target_side == "Sell":
+                                        if ex_i == 'bybit' and side_i == 2 and usd_i >= by_conf_usd:
                                             is_confirmed = True
+                                        p_idx = np.searchsorted(t_ts, ts_i)
+                                        p_pre_idx = np.searchsorted(t_ts, ts_i - 3000)
+                                        if p_idx < len(t_px) and p_pre_idx < len(t_px) and p_pre_idx < p_idx:
+                                            dp = (t_px[p_pre_idx] - t_px[p_idx]) / t_px[p_pre_idx] * 100.0
+                                            if dp >= by_conf_drop:
+                                                is_confirmed = True
+                                    else: # "Buy" (Long scalp on short squeeze)
+                                        if ex_i == 'bybit' and side_i == 1 and usd_i >= by_conf_usd:
+                                            is_confirmed = True
+                                        p_idx = np.searchsorted(t_ts, ts_i)
+                                        p_pre_idx = np.searchsorted(t_ts, ts_i - 3000)
+                                        if p_idx < len(t_px) and p_pre_idx < len(t_px) and p_pre_idx < p_idx:
+                                            rise = (t_px[p_idx] - t_px[p_pre_idx]) / t_px[p_pre_idx] * 100.0
+                                            if rise >= by_conf_drop:
+                                                is_confirmed = True
                                 else:
                                     if ex_i == 'bybit' and usd_i >= 300.0:
                                         is_confirmed = True
+                                        current_target_side = "Sell" if side_i == 2 else "Buy"
 
                                 if is_confirmed and ts_i >= last_trade_end_ts:
                                     entry_ts = ts_i + 380
@@ -179,8 +196,13 @@ def run_continuous_two_stage_tuning() -> Dict[str, Any]:
                                     entry_p = t_px[idx]
                                     p_start_idx = np.searchsorted(t_ts, ts_i - 5000)
                                     pre_px = t_px[max(0, p_start_idx):idx+1]
-                                    pivot_high = np.max(pre_px) if len(pre_px) > 0 else entry_p * 1.006
-                                    sl_price = pivot_high * 1.001
+
+                                    if current_target_side == "Sell":
+                                        pivot_high = np.max(pre_px) if len(pre_px) > 0 else entry_p * 1.006
+                                        sl_price = pivot_high * 1.001
+                                    else:
+                                        pivot_low = np.min(pre_px) if len(pre_px) > 0 else entry_p * 0.994
+                                        sl_price = pivot_low * 0.999
 
                                     end_idx = np.searchsorted(t_ts, entry_ts + 60000)
                                     sub_px = t_px[idx:min(len(t_px), end_idx+1)]
@@ -189,30 +211,39 @@ def run_continuous_two_stage_tuning() -> Dict[str, Any]:
                                     if len(sub_px) < 2:
                                         continue
 
-                                    lowest_p = entry_p
+                                    extreme_p = entry_p
                                     closed = False
 
                                     for s_idx in range(len(sub_px)):
                                         cp = sub_px[s_idx]
                                         ct = sub_ts[s_idx]
-                                        if cp < lowest_p:
-                                            lowest_p = cp
 
-                                        cur_gain = (entry_p - cp) / entry_p * 100.0
-                                        max_gain = (entry_p - lowest_p) / entry_p * 100.0
-                                        cur_bounce = (cp - lowest_p) / lowest_p * 100.0
+                                        if current_target_side == "Sell":
+                                            if cp < extreme_p: extreme_p = cp
+                                            cur_gain = (entry_p - cp) / entry_p * 100.0
+                                            max_gain = (entry_p - extreme_p) / entry_p * 100.0
+                                            cur_bounce = (cp - extreme_p) / extreme_p * 100.0
+                                            hit_sl = cp >= sl_price
+                                            exit_ret = ((entry_p - cp) / entry_p - cost_pct) * 15.0
+                                            sl_ret = ((entry_p - sl_price) / entry_p - cost_pct) * 15.0
+                                        else:
+                                            if cp > extreme_p: extreme_p = cp
+                                            cur_gain = (cp - entry_p) / entry_p * 100.0
+                                            max_gain = (extreme_p - entry_p) / entry_p * 100.0
+                                            cur_bounce = (extreme_p - cp) / extreme_p * 100.0
+                                            hit_sl = cp <= sl_price
+                                            exit_ret = ((cp - entry_p) / entry_p - cost_pct) * 15.0
+                                            sl_ret = ((sl_price - entry_p) / entry_p - cost_pct) * 15.0
 
                                         # 구조적 손절
-                                        if cp >= sl_price:
-                                            exit_ret = ((entry_p - sl_price)/entry_p - cost_pct)*15.0
-                                            trades.append({'win': exit_ret > 0, 'ret': exit_ret})
+                                        if hit_sl:
+                                            trades.append({'win': sl_ret > 0, 'ret': sl_ret})
                                             closed = True
                                             last_trade_end_ts = ct
                                             break
 
                                         # 트레일링 스탑 익절
                                         if max_gain >= 1.0 and cur_bounce >= bounce:
-                                            exit_ret = ((entry_p - cp)/entry_p - cost_pct)*15.0
                                             trades.append({'win': exit_ret > 0, 'ret': exit_ret})
                                             closed = True
                                             last_trade_end_ts = ct
@@ -220,15 +251,14 @@ def run_continuous_two_stage_tuning() -> Dict[str, Any]:
 
                                         # 청산 소진 조기 탈출
                                         if (ct - ts_i) >= 5000 and cur_gain >= 0.35 and (ct - entry_ts) >= 8000:
-                                            exit_ret = ((entry_p - cp)/entry_p - cost_pct)*15.0
                                             trades.append({'win': exit_ret > 0, 'ret': exit_ret})
                                             closed = True
                                             last_trade_end_ts = ct
                                             break
 
                                     if not closed:
-                                        exit_ret = ((entry_p - sub_px[-1])/entry_p - cost_pct)*15.0
-                                        trades.append({'win': exit_ret > 0, 'ret': exit_ret})
+                                        final_exit_ret = ((entry_p - sub_px[-1]) / entry_p - cost_pct) * 15.0 if current_target_side == "Sell" else ((sub_px[-1] - entry_p) / entry_p - cost_pct) * 15.0
+                                        trades.append({'win': final_exit_ret > 0, 'ret': final_exit_ret})
                                         last_trade_end_ts = sub_ts[-1]
 
                                     bin_armed_until = 0

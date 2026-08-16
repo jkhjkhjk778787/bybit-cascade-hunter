@@ -1,12 +1,12 @@
 {
-  "updated_at": "2026-08-16 13:53:37",
-  "total_active_count": 4,
+  "updated_at": "2026-08-16 14:07:50",
+  "total_active_count": 3,
   "symbols": {
     "ACEUSDT": {
       "bin_arm_usd": 500.0,
       "arm_sec": 8.0,
       "bybit_confirm_usd": 50.0,
-      "bybit_confirm_drop": 0.15,
+      "bybit_confirm_drop": 0.12,
       "trailing_bounce": 0.2,
       "min_gain_pct": 1.0,
       "tp_pct": 2.5,
@@ -14,8 +14,8 @@
       "timeout_sec": 45.0,
       "trades": 9,
       "win_rate": 77.8,
-      "total_pnl_pct": 50.62,
-      "profit_factor": 3.95
+      "total_pnl_pct": 50.71,
+      "profit_factor": 3.97
     },
     "HEMIUSDT": {
       "bin_arm_usd": 300.0,
@@ -27,25 +27,10 @@
       "tp_pct": 2.5,
       "sl_pct": 0.6,
       "timeout_sec": 45.0,
-      "trades": 9,
-      "win_rate": 88.9,
-      "total_pnl_pct": 62.42,
-      "profit_factor": 5.58
-    },
-    "SPORTFUNUSDT": {
-      "bin_arm_usd": 200.0,
-      "arm_sec": 8.0,
-      "bybit_confirm_usd": 50.0,
-      "bybit_confirm_drop": 0.08,
-      "trailing_bounce": 0.15,
-      "min_gain_pct": 1.0,
-      "tp_pct": 2.5,
-      "sl_pct": 0.6,
-      "timeout_sec": 45.0,
-      "trades": 5,
+      "trades": 10,
       "win_rate": 80.0,
-      "total_pnl_pct": 12.29,
-      "profit_factor": 2.39
+      "total_pnl_pct": 47.23,
+      "profit_factor": 3.21
     },
     "TUTUSDT": {
       "bin_arm_usd": 200.0,
@@ -59,8 +44,8 @@
       "timeout_sec": 45.0,
       "trades": 5,
       "win_rate": 80.0,
-      "total_pnl_pct": 8.23,
-      "profit_factor": 2.43
+      "total_pnl_pct": 8.36,
+      "profit_factor": 2.41
     }
   }
 }

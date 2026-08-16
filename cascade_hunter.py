@@ -138,11 +138,11 @@ class BybitV5Client:
         with urllib.request.urlopen(req, timeout=5) as resp:
             return json.loads(resp.read().decode())
 
-    def place_market_short_with_tpsl(self, symbol: str, qty_str: str, tp_str: str, sl_str: str, link_id: str):
+    def place_market_order_with_tpsl(self, symbol: str, side: str, qty_str: str, tp_str: str, sl_str: str, link_id: str):
         body = {
             "category": "linear",
             "symbol": symbol,
-            "side": "Sell",
+            "side": side,
             "orderType": "Market",
             "qty": qty_str,
             "orderLinkId": link_id,
@@ -153,6 +153,9 @@ class BybitV5Client:
             "slOrderType": "Market"
         }
         return self._sign_request("POST", "/v5/order/create", body=body)
+
+    def place_market_short_with_tpsl(self, symbol: str, qty_str: str, tp_str: str, sl_str: str, link_id: str):
+        return self.place_market_order_with_tpsl(symbol, "Sell", qty_str, tp_str, sl_str, link_id)
 
     def close_position_market(self, symbol: str):
         pos_res = self.get_positions(symbol)
@@ -349,22 +352,28 @@ class DualExchangeCascadeHunter:
                         qty = float(event.get("q", 0.0))
                         liq_usd = price * qty
 
-                        if side == "SELL" and sym in self.symbol_configs:
+                        if sym in self.symbol_configs:
                             cfg = self.symbol_configs.get(sym, {})
                             arm_threshold = cfg.get("bin_arm_usd", 300.0)
                             arm_duration = cfg.get("arm_sec", 8.0)
 
                             if liq_usd >= arm_threshold:
                                 now = time.time()
-                                self.binance_armed[sym] = now + arm_duration
-                                logger.info(f"🟡 [Binance 도화선 점화!] {sym} 롱 청산 ${liq_usd:,.0f} USD 포착 ➔ Bybit 숏 장전 ({arm_duration}초 유효)")
+                                if side == "SELL":
+                                    # 롱 청산 ➔ 숏 진입 장전
+                                    self.binance_armed[sym] = {"target_side": "Sell", "expires": now + arm_duration}
+                                    logger.info(f"🟡 [Binance 롱 청산 도화선!] {sym} 롱 청산 ${liq_usd:,.0f} USD ➔ Bybit 숏 장전 ({arm_duration}초 유효)")
+                                elif side == "BUY":
+                                    # 숏 청산 ➔ 롱 진입 장전
+                                    self.binance_armed[sym] = {"target_side": "Buy", "expires": now + arm_duration}
+                                    logger.info(f"🟢 [Binance 숏 청산 도화선!] {sym} 숏 청산 ${liq_usd:,.0f} USD ➔ Bybit 롱 장전 ({arm_duration}초 유효)")
 
             except Exception as e:
                 logger.error(f"Binance WS 에러: {e} ➔ 3초 후 재연결...")
                 await asyncio.sleep(3)
 
     async def bybit_market_listener(self):
-        """바이비트 실시간 틱/청산 감시 ➔ 2단계 확증 즉시 숏 격발!"""
+        """바이비트 실시간 틱/청산 감시 ➔ 2단계 확증 즉시 양방향 격발!"""
         while self.is_running:
             try:
                 # 재연결 시 과거 가격 버퍼를 클리어하여 단절 전후 갭으로 인한 오신호 방지
@@ -409,7 +418,7 @@ class DualExchangeCascadeHunter:
                                     while self.bybit_price_buffers[sym] and (now - self.bybit_price_buffers[sym][0][0] > 5.0):
                                         self.bybit_price_buffers[sym].popleft()
 
-                                    # 가격 붕괴 확증 검사
+                                    # 가격 변동 확증 검사
                                     await self.check_bybit_confirmation(sym, p_float, now, event_type="TICK")
 
                             elif topic.startswith("liquidation.") or topic.startswith("allLiquidation."):
@@ -421,15 +430,16 @@ class DualExchangeCascadeHunter:
                                 liq_usd = price * size
                                 now = time.time()
 
-                                # Bybit: 'Buy' side indicates long position liquidated (forced market sell)
-                                is_long_liq = (side in ["Sell", "Buy"] and side == "Sell") or (side == "Buy" and "allLiquidation" in topic)
-                                if (side == "Sell" or is_long_liq) and sym in self.symbol_configs:
+                                is_long_liq = (side == "Sell") or (side == "Buy" and "allLiquidation" in topic)
+                                liq_side = "Sell" if is_long_liq else "Buy"
+
+                                if sym in self.symbol_configs:
                                     if sym not in self.bybit_liq_buffers:
                                         self.bybit_liq_buffers[sym] = deque(maxlen=300)
-                                    self.bybit_liq_buffers[sym].append((now, liq_usd, price))
+                                    self.bybit_liq_buffers[sym].append((now, liq_usd, price, liq_side))
                                     self.last_liq_event_time = now
                                     # Bybit 소액 청산 확증 검사
-                                    await self.check_bybit_confirmation(sym, price, now, event_type="LIQ", liq_usd=liq_usd)
+                                    await self.check_bybit_confirmation(sym, price, now, event_type="LIQ", liq_usd=liq_usd, liq_side=liq_side)
                     finally:
                         ping_task.cancel()
 
@@ -486,8 +496,8 @@ class DualExchangeCascadeHunter:
             except Exception as e:
                 logger.error(f"[hot_reload_loop 에러] {e}")
 
-    async def check_bybit_confirmation(self, symbol: str, current_price: float, now: float, event_type: str, liq_usd: float = 0.0):
-        """2단계 확증 검사: 바이낸스 장전 중 + Bybit 붕괴 신호 ➔ 0ms 숏 발사!"""
+    async def check_bybit_confirmation(self, symbol: str, current_price: float, now: float, event_type: str, liq_usd: float = 0.0, liq_side: str = ""):
+        """2단계 확증 검사: 바이낸스 장전 중 + Bybit 확증 신호 ➔ 0ms 양방향(롱/숏) 격발!"""
         if self.in_position or self.is_circuit_breaker_triggered:
             return
         if now < self.cooldown_until:
@@ -504,10 +514,15 @@ class DualExchangeCascadeHunter:
         by_conf_drop = cfg.get("bybit_confirm_drop", 0.10)
 
         # 1. 바이낸스 장전 유효성 체크
+        armed_info = self.binance_armed.get(symbol)
         is_armed = False
-        if symbol in self.binance_armed:
-            if now <= self.binance_armed[symbol]:
+        target_side = "Sell"
+
+        if armed_info:
+            exp = armed_info.get("expires", 0.0) if isinstance(armed_info, dict) else armed_info
+            if now <= exp:
                 is_armed = True
+                target_side = armed_info.get("target_side", "Sell") if isinstance(armed_info, dict) else "Sell"
             else:
                 del self.binance_armed[symbol]
 
@@ -516,29 +531,52 @@ class DualExchangeCascadeHunter:
         confirm_reason = ""
 
         if is_armed:
-            if event_type == "LIQ" and liq_usd >= by_conf_usd:
-                is_confirmed = True
-                confirm_reason = f"🟡 Binance 도화선 ➔ 🟢 Bybit 전이청산 ${liq_usd:,.0f}"
-            elif event_type == "TICK":
-                p_buf = self.bybit_price_buffers.get(symbol, deque(maxlen=500))
-                if len(p_buf) >= 2:
-                    p_old = p_buf[0][1]
-                    drop_pct = (p_old - current_price) / p_old * 100.0
-                    if drop_pct >= by_conf_drop:
-                        is_confirmed = True
-                        confirm_reason = f"🟡 Binance 도화선 ➔ 🟢 Bybit 낙폭 -{drop_pct:.2f}% 붕괴"
+            if target_side == "Sell":
+                # 롱 청산 폭포수 ➔ 숏 격발
+                if event_type == "LIQ" and liq_side == "Sell" and liq_usd >= by_conf_usd:
+                    is_confirmed = True
+                    confirm_reason = f"🟡 Binance 롱청산 ➔ 🔴 Bybit 전이청산 ${liq_usd:,.0f}"
+                elif event_type == "TICK":
+                    p_buf = self.bybit_price_buffers.get(symbol, deque(maxlen=500))
+                    if len(p_buf) >= 2:
+                        p_old = p_buf[0][1]
+                        drop_pct = (p_old - current_price) / p_old * 100.0
+                        if drop_pct >= by_conf_drop:
+                            is_confirmed = True
+                            confirm_reason = f"🟡 Binance 롱청산 ➔ 🔴 Bybit 낙폭 -{drop_pct:.2f}%"
+            elif target_side == "Buy":
+                # 숏 청산 스퀴즈 ➔ 롱 격발
+                if event_type == "LIQ" and liq_side == "Buy" and liq_usd >= by_conf_usd:
+                    is_confirmed = True
+                    confirm_reason = f"🟢 Binance 숏청산 ➔ 🚀 Bybit 스퀴즈청산 ${liq_usd:,.0f}"
+                elif event_type == "TICK":
+                    p_buf = self.bybit_price_buffers.get(symbol, deque(maxlen=500))
+                    if len(p_buf) >= 2:
+                        p_old = p_buf[0][1]
+                        rise_pct = (current_price - p_old) / p_old * 100.0
+                        if rise_pct >= by_conf_drop:
+                            is_confirmed = True
+                            confirm_reason = f"🟢 Binance 숏청산 ➔ 🚀 Bybit 급등 +{rise_pct:.2f}%"
         else:
             # 바이비트 자체 대형 청산($300+) 백업 트리거
             if event_type == "LIQ":
                 buf = self.bybit_liq_buffers.get(symbol, deque(maxlen=500))
                 while buf and (now - buf[0][0] > 5.0): buf.popleft()
-                tot_liq = sum([b[1] for b in buf])
-                if tot_liq >= 300.0:
+                tot_liq_sell = sum([b[1] for b in buf if len(b) > 3 and b[3] == "Sell"])
+                tot_liq_buy = sum([b[1] for b in buf if len(b) > 3 and b[3] == "Buy"])
+                if tot_liq_sell >= 300.0:
                     is_confirmed = True
-                    confirm_reason = f"🟢 Bybit 자체 대형청산 ${tot_liq:,.0f} 폭발"
+                    target_side = "Sell"
+                    confirm_reason = f"🔴 Bybit 자체 롱대형청산 ${tot_liq_sell:,.0f} 폭발"
+                elif tot_liq_buy >= 300.0:
+                    is_confirmed = True
+                    target_side = "Buy"
+                    confirm_reason = f"🟢 Bybit 자체 숏대형청산 ${tot_liq_buy:,.0f} 폭발"
 
         if is_confirmed:
-            logger.warning(f"🚀 [2단계 숏 격발!] {symbol} ({confirm_reason}) ➔ 0ms 시장가 숏 진입!")
+            side_kr = "숏" if target_side == "Sell" else "롱"
+            icon = "🌊" if target_side == "Sell" else "🚀"
+            logger.warning(f"🚀 [2단계 {side_kr} 격발!] {symbol} ({confirm_reason}) ➔ 0ms 시장가 {side_kr} 진입!")
 
             px = current_price if current_price > 0 else self.latest_prices.get(symbol, 0.0)
             if px <= 0: return
@@ -547,11 +585,15 @@ class DualExchangeCascadeHunter:
             sl_pct = cfg.get("sl_pct", 0.60)
             self.active_timeout_sec = cfg.get("timeout_sec", 45.0)
 
-            # 구조적 직전 고점 SL
             p_buf = self.bybit_price_buffers.get(symbol, deque())
-            p_high = max([item[1] for item in p_buf]) if p_buf else px * (1.0 + sl_pct / 100.0)
-            sl_raw = max(px * (1.0 + sl_pct / 100.0), p_high * 1.001)
-            tp_raw = px * (1.0 - tp_pct / 100.0)
+            if target_side == "Sell":
+                p_high = max([item[1] for item in p_buf]) if p_buf else px * (1.0 + sl_pct / 100.0)
+                sl_raw = max(px * (1.0 + sl_pct / 100.0), p_high * 1.001)
+                tp_raw = px * (1.0 - tp_pct / 100.0)
+            else:
+                p_low = min([item[1] for item in p_buf]) if p_buf else px * (1.0 - sl_pct / 100.0)
+                sl_raw = min(px * (1.0 - sl_pct / 100.0), p_low * 0.999)
+                tp_raw = px * (1.0 + tp_pct / 100.0)
 
             tp_str = self.format_price(symbol, tp_raw)
             sl_str = self.format_price(symbol, sl_raw)
@@ -560,24 +602,24 @@ class DualExchangeCascadeHunter:
                 logger.warning(f"⚠️ [{symbol}] 수량 산출 불가 (minQty 과다) ➔ 진입 스킵")
                 return
 
-            link_id = f"CASCADE_S_{int(now*1000)}"
-            res = self.client.place_market_short_with_tpsl(symbol, qty_str, tp_str, sl_str, link_id)
+            link_id = f"CASCADE_{target_side[0]}_{int(now*1000)}"
+            res = self.client.place_market_order_with_tpsl(symbol, target_side, qty_str, tp_str, sl_str, link_id)
 
             if res.get("retCode") == 0:
                 self.in_position = True
                 self.active_symbol = symbol
-                self.active_side = "Sell"
+                self.active_side = target_side
                 self.active_entry_price = px
                 self.active_entry_time = now
                 self.lowest_price_seen = px
                 self.last_liq_event_time = now
                 if symbol in self.binance_armed: del self.binance_armed[symbol]
 
-                logger.info(f"🚀 [숏 탑승 성공] {symbol} 수량: {qty_str} | 진입: ${px} | TP: ${tp_str} | SL: ${sl_str} | 근거: {confirm_reason}")
+                logger.info(f"🚀 [{side_kr} 탑승 성공] {symbol} 수량: {qty_str} | 진입: ${px} | TP: ${tp_str} | SL: ${sl_str} | 근거: {confirm_reason}")
                 await self.notifier.async_send_embed(
-                    title=f"🌊 [숏 진입] {symbol}",
+                    title=f"{icon} [{side_kr} 진입] {symbol}",
                     description=f"근거: `{confirm_reason}`\n진입: `${px}` | 수량: `{qty_str}` | TP: `${tp_str}` | SL: `${sl_str}`",
-                    color=15158332
+                    color=15158332 if target_side == "Sell" else 3066993
                 )
             else:
                 logger.error(f"⚠️ [주문 실패] {symbol} 거절: {res.get('retMsg')}")
@@ -606,12 +648,20 @@ class DualExchangeCascadeHunter:
                 cur_px = self.latest_prices.get(self.active_symbol, self.active_entry_price)
                 if cur_px <= 0: continue
 
-                if cur_px < self.lowest_price_seen:
-                    self.lowest_price_seen = cur_px
+                # 양방향(롱/숏) 실시간 손익 및 극값(최고/최저) 갱신
+                if self.active_side == "Sell":
+                    if cur_px < self.lowest_price_seen:
+                        self.lowest_price_seen = cur_px
+                    pnl_pct = (self.active_entry_price - cur_px) / self.active_entry_price * 100.0
+                    max_gain_pct = (self.active_entry_price - self.lowest_price_seen) / self.active_entry_price * 100.0
+                    bounce_pct = (cur_px - self.lowest_price_seen) / self.lowest_price_seen * 100.0
+                else: # "Buy" (Long)
+                    if cur_px > self.lowest_price_seen:
+                        self.lowest_price_seen = cur_px
+                    pnl_pct = (cur_px - self.active_entry_price) / self.active_entry_price * 100.0
+                    max_gain_pct = (self.lowest_price_seen - self.active_entry_price) / self.active_entry_price * 100.0
+                    bounce_pct = (self.lowest_price_seen - cur_px) / self.lowest_price_seen * 100.0
 
-                pnl_pct = (self.active_entry_price - cur_px) / self.active_entry_price * 100.0
-                max_gain_pct = (self.active_entry_price - self.lowest_price_seen) / self.active_entry_price * 100.0
-                bounce_pct = (cur_px - self.lowest_price_seen) / self.lowest_price_seen * 100.0
                 elapsed = now - self.active_entry_time
 
                 cfg = self.symbol_configs.get(self.active_symbol, {})
@@ -620,7 +670,8 @@ class DualExchangeCascadeHunter:
 
                 # 1. 지능형 트레일링 스탑
                 if max_gain_pct >= min_gain_req and bounce_pct >= bounce_req:
-                    logger.warning(f"🎯 [{self.active_symbol} 트레일링 익절] 최고 +{max_gain_pct:.2f}% ➔ 반등 {bounce_pct:.2f}% 시장가 익절!")
+                    side_kr = "숏" if self.active_side == "Sell" else "롱"
+                    logger.warning(f"🎯 [{self.active_symbol} {side_kr} 트레일링 익절] 최고 +{max_gain_pct:.2f}% ➔ 반등/눌림 {bounce_pct:.2f}% 시장가 익절!")
                     close_res = self.client.close_position_market(self.active_symbol)
                     if close_res.get("retCode") != 0:
                         logger.error(f"⚠️ [{self.active_symbol}] 청산 실패: {close_res.get('retMsg')} ➔ 포지션 유지")
@@ -632,8 +683,8 @@ class DualExchangeCascadeHunter:
                     await asyncio.sleep(0.5)
                     await self.check_trade_result(sym)
                     await self.notifier.async_send_embed(
-                        title=f"🎯 [트레일링 익절] {sym}",
-                        description=f"최고 낙폭 `+{max_gain_pct:.2f}%` ➔ 반등 `{bounce_pct:.2f}%` 감지 시장가 익절",
+                        title=f"🎯 [트레일링 익절] {sym} ({side_kr})",
+                        description=f"최고 수익 `+{max_gain_pct:.2f}%` ➔ 되돌림 `{bounce_pct:.2f}%` 감지 시장가 익절",
                         color=3066993
                     )
                     continue
@@ -641,7 +692,8 @@ class DualExchangeCascadeHunter:
                 # 2. 청산 소진 조기 탈출
                 time_since_liq = now - self.last_liq_event_time
                 if time_since_liq >= 5.0 and pnl_pct >= 0.35 and elapsed >= 8.0:
-                    logger.warning(f"⏱️ [{self.active_symbol} 청산 소진 익절] 5초간 청산 멈춤 & 수익 +{pnl_pct:.2f}% ➔ 시장가 조기 익절!")
+                    side_kr = "숏" if self.active_side == "Sell" else "롱"
+                    logger.warning(f"⏱️ [{self.active_symbol} {side_kr} 청산 소진 익절] 5초간 청산 멈춤 & 수익 +{pnl_pct:.2f}% ➔ 시장가 조기 익절!")
                     close_res = self.client.close_position_market(self.active_symbol)
                     if close_res.get("retCode") != 0:
                         logger.error(f"⚠️ [{self.active_symbol}] 청산 실패: {close_res.get('retMsg')} ➔ 포지션 유지")
@@ -653,7 +705,7 @@ class DualExchangeCascadeHunter:
                     await asyncio.sleep(0.5)
                     await self.check_trade_result(sym)
                     await self.notifier.async_send_embed(
-                        title=f"⏱️ [소진 탈출] {sym}",
+                        title=f"⏱️ [소진 탈출] {sym} ({side_kr})",
                         description=f"청산 멈춤 ➔ `+{pnl_pct:.2f}%` 조기 익절",
                         color=3066993
                     )

@@ -272,12 +272,14 @@ class ShadowIncubator:
                                 liq_usd = price * size
                                 now = time.time()
 
-                                is_long_liq = (side in ["Sell", "Buy"] and side == "Sell") or (side == "Buy" and "allLiquidation" in topic)
-                                if (side == "Sell" or is_long_liq) and sym in self.incubating_symbols:
+                                is_long_liq = (side == "Sell") or (side == "Buy" and "allLiquidation" in topic)
+                                liq_type = "LongLiq" if is_long_liq else "ShortLiq"
+
+                                if sym in self.incubating_symbols:
                                     if sym not in self.liq_buffers:
                                         self.liq_buffers[sym] = deque(maxlen=300)
-                                    self.liq_buffers[sym].append((now, liq_usd, price))
-                                    await self.check_shadow_trigger(sym, price, now)
+                                    self.liq_buffers[sym].append((now, liq_usd, price, liq_type))
+                                    await self.check_shadow_trigger(sym, price, now, liq_type)
                     finally:
                         ping_task.cancel()
 
@@ -285,8 +287,8 @@ class ShadowIncubator:
                 logger.error(f"인큐베이터 WS 에러: {e} ➔ 2초 후 재연결")
                 await asyncio.sleep(2)
 
-    async def check_shadow_trigger(self, symbol: str, current_price: float, now: float):
-        """가상 숏 진입 조건 검사 (실전 돈 투입 X)"""
+    async def check_shadow_trigger(self, symbol: str, current_price: float, now: float, liq_type: str):
+        """가상 양방향 진입 조건 검사 (롱 청산 ➔ 가상 숏 / 숏 청산 ➔ 가상 롱)"""
         if symbol in self.active_shadow_positions:
             return  # 이미 가상 포지션 보유 중
 
@@ -294,29 +296,47 @@ class ShadowIncubator:
         while buf and (now - buf[0][0] > 5.0):
             buf.popleft()
 
-        total_liq_5s = sum([item[1] for item in buf])
-        liq_cnt = len(buf)
+        matching_liqs = [item for item in buf if len(item) > 3 and item[3] == liq_type]
+        total_liq_5s = sum([item[1] for item in matching_liqs])
+        liq_cnt = len(matching_liqs)
 
-        # 5초 $300 이상 + 낙폭 검증
+        # 5초 $250 이상 + 방향별 가격 변동 검증
         if (liq_cnt >= 2 and total_liq_5s >= 250.0) or total_liq_5s >= 350.0:
             p_buf = self.price_buffers.get(symbol, deque())
             if len(p_buf) >= 2:
                 p_old = p_buf[0][1]
                 p_cur = current_price if current_price > 0 else self.latest_prices.get(symbol, p_old)
-                drop_pct = (p_old - p_cur) / p_old * 100.0
 
-                if drop_pct >= 0.10:
-                    # 🧪 [가상 숏 진입!]
-                    tp_price = p_cur * 0.985   # +1.5% 익절
-                    sl_price = p_cur * 1.006   # -0.6% 손절
-                    self.active_shadow_positions[symbol] = {
-                        "entry_price": p_cur,
-                        "entry_time": now,
-                        "tp_price": tp_price,
-                        "sl_price": sl_price,
-                        "timeout_sec": 45.0
-                    }
-                    logger.info(f"🧪 [가상 숏 진입] {symbol} @ ${p_cur:.5f} | 가상 TP: ${tp_price:.5f} | 가상 SL: ${sl_price:.5f}")
+                if liq_type == "LongLiq":
+                    # 롱 청산 ➔ 가상 숏
+                    drop_pct = (p_old - p_cur) / p_old * 100.0
+                    if drop_pct >= 0.10:
+                        tp_price = p_cur * 0.985   # +1.5% 익절
+                        sl_price = p_cur * 1.006   # -0.6% 손절
+                        self.active_shadow_positions[symbol] = {
+                            "side": "Sell",
+                            "entry_price": p_cur,
+                            "entry_time": now,
+                            "tp_price": tp_price,
+                            "sl_price": sl_price,
+                            "timeout_sec": 45.0
+                        }
+                        logger.info(f"🧪 [가상 숏 진입] {symbol} @ ${p_cur:.5f} | 가상 TP: ${tp_price:.5f} | 가상 SL: ${sl_price:.5f}")
+                else:
+                    # 숏 청산 ➔ 가상 롱
+                    rise_pct = (p_cur - p_old) / p_old * 100.0
+                    if rise_pct >= 0.10:
+                        tp_price = p_cur * 1.015   # +1.5% 익절
+                        sl_price = p_cur * 0.994   # -0.6% 손절
+                        self.active_shadow_positions[symbol] = {
+                            "side": "Buy",
+                            "entry_price": p_cur,
+                            "entry_time": now,
+                            "tp_price": tp_price,
+                            "sl_price": sl_price,
+                            "timeout_sec": 45.0
+                        }
+                        logger.info(f"🧪 [가상 롱 진입] {symbol} @ ${p_cur:.5f} | 가상 TP: ${tp_price:.5f} | 가상 SL: ${sl_price:.5f}")
 
     async def check_shadow_positions(self, symbol: str, cur_price: float, now: float):
         """실시간 틱으로 가상 포지션 청산 여부 100% 추적"""
@@ -324,6 +344,7 @@ class ShadowIncubator:
             return
 
         pos = self.active_shadow_positions[symbol]
+        side = pos.get("side", "Sell")
         entry_p = pos["entry_price"]
         entry_t = pos["entry_time"]
         tp_p = pos["tp_price"]
@@ -334,19 +355,34 @@ class ShadowIncubator:
         win = False
         pnl_pct = 0.0
 
-        if cur_price <= tp_p:
-            closed = True
-            win = True
-            pnl_pct = 1.50 - 0.12  # 수수료/슬리피지 차감
-        elif cur_price >= sl_p:
-            closed = True
-            win = False
-            pnl_pct = -0.60 - 0.12
-        elif (now - entry_t) >= to_sec:
-            closed = True
-            net_diff = (entry_p - cur_price) / entry_p * 100.0
-            pnl_pct = net_diff - 0.12
-            win = pnl_pct > 0
+        if side == "Sell":
+            if cur_price <= tp_p:
+                closed = True
+                win = True
+                pnl_pct = 1.50 - 0.12
+            elif cur_price >= sl_p:
+                closed = True
+                win = False
+                pnl_pct = -0.60 - 0.12
+            elif (now - entry_t) >= to_sec:
+                closed = True
+                net_diff = (entry_p - cur_price) / entry_p * 100.0
+                pnl_pct = net_diff - 0.12
+                win = pnl_pct > 0
+        else: # "Buy" (Long)
+            if cur_price >= tp_p:
+                closed = True
+                win = True
+                pnl_pct = 1.50 - 0.12
+            elif cur_price <= sl_p:
+                closed = True
+                win = False
+                pnl_pct = -0.60 - 0.12
+            elif (now - entry_t) >= to_sec:
+                closed = True
+                net_diff = (cur_price - entry_p) / entry_p * 100.0
+                pnl_pct = net_diff - 0.12
+                win = pnl_pct > 0
 
         if closed:
             del self.active_shadow_positions[symbol]
