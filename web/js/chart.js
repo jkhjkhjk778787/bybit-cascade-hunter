@@ -524,15 +524,6 @@ export class ProChart {
         item: item,
         index: i
       });
-
-      // Time X-Axis Label
-      const labelInterval = Math.max(1, Math.floor(n / 6));
-      if (i % labelInterval === 0 || i === n - 1) {
-        ctx.fillStyle = isPeak ? '#f6ad55' : '#8b949e';
-        ctx.textAlign = 'center';
-        ctx.font = '10px "JetBrains Mono", monospace';
-        ctx.fillText(item.time_str || '', midX, h - 6);
-      }
     }
     this.liqBarCoords = barCoords;
 
