@@ -732,6 +732,8 @@ class CascadeTradingServer:
         self.recent_liquidations_by_sym: Dict[str, deque] = {}
 
         self.ticker_ws = None
+        self.binance_trade_ws = None
+        self.bybit_trade_ws = None
         self._cvd_deltas: Dict[str, Dict[str, float]] = {}
         self.position_entry_times: Dict[str, float] = {}
         self.cascade_cooldowns: Dict[str, float] = {}
@@ -743,6 +745,7 @@ class CascadeTradingServer:
             "DOGEUSDT", "ZECUSDT", "ADAUSDT", "WALUSDT", "WLDUSDT"
         ]
         self.subscribed_ticker_symbols: Set[str] = set(self.top20_symbols)
+        self.subscribed_trade_symbols: Set[str] = set(self.top20_symbols)
 
         # 초기 메모리 적재
         self.liq_manager.sync_from_disk_snapshot()
@@ -759,7 +762,8 @@ class CascadeTradingServer:
 
         if to_remove or to_add:
             self.top20_symbols = list(new_top20)
-            self.subscribed_ticker_symbols = set(new_top20)
+            self.subscribed_ticker_symbols.update(new_top20)
+            self.subscribed_trade_symbols.update(new_top20)
             logger.info(f"🔄 [구독 심볼 동적 교체] 제외: {', '.join(to_remove) or '없음'} | 추가: {', '.join(to_add) or '없음'}")
 
             # Bybit Ticker 웹소켓 구독 갱신
@@ -768,31 +772,76 @@ class CascadeTradingServer:
                     if to_remove:
                         unsub_topics = [f"tickers.{s}" for s in to_remove]
                         await self.ticker_ws.send_str(orjson.dumps({"op": "unsubscribe", "args": unsub_topics}).decode('utf-8'))
-                        logger.info(f"🛑 [Bybit Ticker Stream] TOP 20 제외 심볼 구독 해제: {', '.join(to_remove)}")
                     if to_add:
-                        # 신규 진입 심볼 규격 사전 검증 캐싱
                         for s in to_add:
                             spec = self.trader.get_symbol_spec(s)
-                            logger.info(f"🔍 [신규 심볼 규격 검증] {s}: 최대레버리지 {spec.get('max_leverage')}x | minQty {spec.get('min_qty')} | qtyStep {spec.get('qty_step')} | minNotional ${spec.get('min_notional')}")
+                            logger.info(f"🔍 [신규 심볼 규격 검증] {s}: 최대레버리지 {spec.get('max_leverage')}x | minQty {spec.get('min_qty')} | qtyStep {spec.get('qty_step')}")
                         sub_topics = [f"tickers.{s}" for s in to_add]
                         await self.ticker_ws.send_str(orjson.dumps({"op": "subscribe", "args": sub_topics}).decode('utf-8'))
-                        logger.info(f"✨ [Bybit Ticker Stream] TOP 20 신규 진입 심볼 구독 등록: {', '.join(to_add)}")
             except Exception as e:
                 logger.error(f"티커 동적 구독 실패: {e}")
 
-    async def subscribe_ticker_symbol(self, symbol: str):
-        """특정 심볼 조회 시 임시 티커 스트림 활성화"""
-        if not symbol or symbol in self.subscribed_ticker_symbols:
+            # Bybit & Binance Trade (CVD) 웹소켓 구독 갱신
+            if to_add:
+                try:
+                    if self.bybit_trade_ws and not self.bybit_trade_ws.closed:
+                        byb_topics = [f"publicTrade.{s}" for s in to_add]
+                        await self.bybit_trade_ws.send_str(orjson.dumps({"op": "subscribe", "args": byb_topics}).decode('utf-8'))
+                        logger.info(f"✨ [Bybit Trade Stream] TOP 20 신규 CVD 구독: {', '.join(to_add)}")
+                except Exception as e:
+                    logger.error(f"Bybit Trade TOP20 동적 구독 실패: {e}")
+
+                try:
+                    if self.binance_trade_ws and not self.binance_trade_ws.closed:
+                        bin_params = [f"{s.lower()}@trade" for s in to_add]
+                        await self.binance_trade_ws.send_str(orjson.dumps({
+                            "method": "SUBSCRIBE",
+                            "params": bin_params,
+                            "id": int(time.time() * 1000)
+                        }).decode('utf-8'))
+                        logger.info(f"✨ [Binance Trade Stream] TOP 20 신규 CVD 구독: {', '.join(to_add)}")
+                except Exception as e:
+                    logger.error(f"Binance Trade TOP20 동적 구독 실패: {e}")
+
+    async def subscribe_symbol(self, symbol: str):
+        """특정 심볼 조회 시 Bybit Ticker + Bybit CVD + Binance CVD 온디맨드 즉시 활성화"""
+        if not symbol:
             return
-        self.subscribed_ticker_symbols.add(symbol)
-        spec = self.trader.get_symbol_spec(symbol)
-        logger.info(f"🔍 [온디맨드 심볼 규격 검증] {symbol}: 최대레버리지 {spec.get('max_leverage')}x | minQty {spec.get('min_qty')} | qtyStep {spec.get('qty_step')}")
-        if self.ticker_ws and not self.ticker_ws.closed:
-            try:
-                await self.ticker_ws.send_str(orjson.dumps({"op": "subscribe", "args": [f"tickers.{symbol}"]}).decode('utf-8'))
-                logger.info(f"📡 [Bybit Ticker Stream] 심볼 실시간 구독 추가: tickers.{symbol}")
-            except Exception as e:
-                logger.error(f"티커 동적 구독 실패: {e}")
+        symbol = symbol.upper()
+
+        # 1. Ticker 스트림 구독
+        if symbol not in self.subscribed_ticker_symbols:
+            self.subscribed_ticker_symbols.add(symbol)
+            spec = self.trader.get_symbol_spec(symbol)
+            logger.info(f"🔍 [온디맨드 심볼 규격 검증] {symbol}: 최대레버리지 {spec.get('max_leverage')}x | minQty {spec.get('min_qty')} | qtyStep {spec.get('qty_step')}")
+            if self.ticker_ws and not self.ticker_ws.closed:
+                try:
+                    await self.ticker_ws.send_str(orjson.dumps({"op": "subscribe", "args": [f"tickers.{symbol}"]}).decode('utf-8'))
+                    logger.info(f"📡 [Bybit Ticker Stream] 온디맨드 구독: tickers.{symbol}")
+                except Exception as e:
+                    logger.error(f"티커 동적 구독 실패: {e}")
+
+        # 2. CVD 실시간 체결 스트림 (Bybit + Binance) 구독
+        if symbol not in self.subscribed_trade_symbols:
+            self.subscribed_trade_symbols.add(symbol)
+            if self.bybit_trade_ws and not self.bybit_trade_ws.closed:
+                try:
+                    await self.bybit_trade_ws.send_str(orjson.dumps({"op": "subscribe", "args": [f"publicTrade.{symbol}"]}).decode('utf-8'))
+                    logger.info(f"🟠 [Bybit Trade Stream] 온디맨드 CVD 구독: publicTrade.{symbol}")
+                except Exception as e:
+                    logger.error(f"Bybit Trade 온디맨드 구독 실패: {e}")
+
+            if self.binance_trade_ws and not self.binance_trade_ws.closed:
+                try:
+                    bin_msg = {
+                        "method": "SUBSCRIBE",
+                        "params": [f"{symbol.lower()}@trade"],
+                        "id": int(time.time() * 1000)
+                    }
+                    await self.binance_trade_ws.send_str(orjson.dumps(bin_msg).decode('utf-8'))
+                    logger.info(f"🟡 [Binance Trade Stream] 온디맨드 CVD 구독: {symbol.lower()}@trade")
+                except Exception as e:
+                    logger.error(f"Binance Trade 온디맨드 구독 실패: {e}")
 
     def setup_routes(self):
         self.app.router.add_get("/", self.handle_index)
@@ -901,7 +950,7 @@ class CascadeTradingServer:
     async def handle_api_history(self, request: web.Request) -> web.Response:
         """0ms 초고속 차트 데이터 및 청산 내역 반환"""
         symbol = request.query.get("symbol", "VELVETUSDT").upper()
-        asyncio.create_task(self.subscribe_ticker_symbol(symbol))
+        asyncio.create_task(self.subscribe_symbol(symbol))
         chart_data = await self.fetch_bybit_chart_data(symbol)
 
         # In-memory recent liquidations for this symbol
@@ -1234,19 +1283,20 @@ class CascadeTradingServer:
             await asyncio.sleep(900.0)
 
     async def run_binance_trade_stream(self):
-        """바이낸스 USDT-M 선물 20종 실시간 체결(trade) 스트림 ➔ CVD 델타 집계"""
+        """바이낸스 USDT-M 선물 실시간 체결(trade) 스트림 ➔ CVD 델타 집계"""
         while self.is_running:
             try:
-                symbols = [s.lower() for s in self.top20_symbols]
+                symbols = [s.lower() for s in self.subscribed_trade_symbols]
                 stream_param = "/".join([f"{s}@trade" for s in symbols])
                 url = f"wss://fstream.binance.com/stream?streams={stream_param}"
                 async with self._http_session.ws_connect(url, heartbeat=15.0) as ws:
+                    self.binance_trade_ws = ws
                     logger.info(f"🟡 [Binance Trade Stream] {len(symbols)}개 심볼 실시간 체결(CVD) 연결 완료")
                     async for msg in ws:
                         if not self.is_running: break
                         if msg.type == WSMsgType.TEXT:
                             data = orjson.loads(msg.data)
-                            t = data.get("data", {})
+                            t = data.get("data", data)
                             sym = t.get("s")
                             if sym:
                                 p = float(t.get("p", 0.0))
@@ -1262,13 +1312,16 @@ class CascadeTradingServer:
             except Exception as e:
                 logger.error(f"Binance Trade Stream 에러: {e} ➔ 3초 후 재연결...")
                 await asyncio.sleep(3)
+            finally:
+                self.binance_trade_ws = None
 
     async def run_bybit_trade_stream(self):
-        """바이비트 Linear 선물 20종 실시간 체결(publicTrade) 스트림 ➔ CVD 델타 집계"""
+        """바이비트 Linear 선물 실시간 체결(publicTrade) 스트림 ➔ CVD 델타 집계"""
         while self.is_running:
             try:
                 async with self._http_session.ws_connect(BYBIT_WS_URL, heartbeat=20.0) as ws:
-                    sym_list = list(self.top20_symbols)
+                    self.bybit_trade_ws = ws
+                    sym_list = list(self.subscribed_trade_symbols)
                     chunk_size = 10
                     for i in range(0, len(sym_list), chunk_size):
                         chunk = [f"publicTrade.{s}" for s in sym_list[i:i + chunk_size]]
@@ -1298,6 +1351,8 @@ class CascadeTradingServer:
             except Exception as e:
                 logger.error(f"Bybit Trade Stream 에러: {e} ➔ 3초 후 재연결...")
                 await asyncio.sleep(3)
+            finally:
+                self.bybit_trade_ws = None
 
     async def run_cvd_broadcast_loop(self):
         """100ms 주기로 누적된 Binance & Bybit CVD 델타 일괄(Batch) 브로드캐스트"""
