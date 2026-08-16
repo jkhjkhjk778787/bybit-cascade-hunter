@@ -441,11 +441,13 @@ class CascadeTradingServer:
             self.ws_clients.discard(d)
 
     async def run_liquidation_stream(self):
-        """사용자님의 crypto-liquidation-stream을 통한 실시간 멀티 거래소 청산 브로드캐스트"""
+        """사용자님의 crypto-liquidation-stream을 통한 실시간 멀티 거래소 청산 브로드캐스트 & 연쇄 감지"""
+        binance_recent_liqs: Dict[str, Dict[str, Any]] = {}
+
         while self.is_running:
             try:
                 async with LiquidationStream(exchanges=["binance", "bybit", "okx"], min_notional_usd=0.0) as stream:
-                    logger.info("⚡ [crypto_liquidation] 3대 거래소 실시간 청산 스트림 브로드캐스터 가동!")
+                    logger.info("⚡ [crypto_liquidation] 3대 거래소 실시간 청산 스트림 & 연쇄 감지기 가동!")
                     async for event in stream:
                         if not self.is_running: break
 
@@ -454,18 +456,51 @@ class CascadeTradingServer:
                         self.recent_liquidations.append(event_dict)
 
                         sym = event.symbol
+                        is_cascade = False
+                        cascade_data = None
 
-                        if event.exchange == "binance" and event.notional_usd >= 200.0:
-                            target_side = "Sell" if event.is_long_liquidation else "Buy"
-                            self.armed_status[sym] = {
-                                "target_side": target_side,
-                                "expires": now + 8.0,
-                                "duration": 8.0,
-                                "notional_usd": event.notional_usd,
-                                "exchange": "binance",
-                                "side_kr": "숏" if target_side == "Sell" else "롱"
+                        if event.exchange == "binance":
+                            binance_recent_liqs[sym] = {
+                                "ts": now,
+                                "is_long": event.is_long_liquidation,
+                                "usd": event.notional_usd,
+                                "price": event.price
                             }
 
+                            if event.notional_usd >= 200.0:
+                                target_side = "Sell" if event.is_long_liquidation else "Buy"
+                                self.armed_status[sym] = {
+                                    "target_side": target_side,
+                                    "expires": now + 8.0,
+                                    "duration": 8.0,
+                                    "notional_usd": event.notional_usd,
+                                    "exchange": "binance",
+                                    "side_kr": "숏" if target_side == "Sell" else "롱"
+                                }
+
+                        elif event.exchange == "bybit":
+                            bin_liq = binance_recent_liqs.get(sym)
+                            if bin_liq and (now - bin_liq["ts"] <= 8.0) and (bin_liq["is_long"] == event.is_long_liquidation):
+                                is_cascade = True
+                                lag_sec = round(now - bin_liq["ts"], 2)
+                                target_side = "Sell" if event.is_long_liquidation else "Buy"
+                                cascade_data = {
+                                    "symbol": sym,
+                                    "is_long_liq": event.is_long_liquidation,
+                                    "target_side": target_side,
+                                    "binance_usd": bin_liq["usd"],
+                                    "bybit_usd": event.notional_usd,
+                                    "lag_sec": lag_sec,
+                                    "timestamp": int(now * 1000)
+                                }
+
+                                logger.info(f"💥 [연쇄 청산 포착!] {sym} (Binance ${bin_liq['usd']:,.0f} ➔ Bybit ${event.notional_usd:,.0f} | {lag_sec}s 전이)")
+                                await self.broadcast({
+                                    "type": "CASCADE_BURST",
+                                    "cascade": cascade_data
+                                })
+
+                        event_dict["is_cascade"] = is_cascade
                         await self.broadcast({
                             "type": "LIQUIDATION",
                             "event": event_dict,

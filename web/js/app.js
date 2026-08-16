@@ -19,7 +19,7 @@ class CascadeTradingApp {
 
     // Components
     this.chart = new ProChart('proChartCanvas');
-    this.radar = new RadarComponent('armedList', 'liqFeedList');
+    this.radar = new RadarComponent('cascadeList', 'binanceFeedList', 'bybitFeedList');
     this.terminal = new TerminalComponent(this);
     this.orderflow = new OrderflowComponent('alertFeed');
 
@@ -86,17 +86,7 @@ class CascadeTradingApp {
       priceEl.textContent = '조회 중...';
     }
 
-    // 2. Highlight Row in Matrix Table
-    document.querySelectorAll('#symbolTableBody tr').forEach(r => {
-      if (r.dataset.symbol === sym || r.textContent.includes(sym)) {
-        r.classList.add('selected');
-        r.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      } else {
-        r.classList.remove('selected');
-      }
-    });
-
-    // 3. Switch Chart & Armed Status
+    // 2. Switch Chart & Armed Status
     this.chart.setSymbol(sym);
     const armed = this.armedSymbols[sym];
     if (armed && (Date.now() / 1000 <= armed.expires)) {
@@ -105,7 +95,7 @@ class CascadeTradingApp {
       this.chart.setArmedZone(null);
     }
 
-    // 4. Switch Terminal
+    // 3. Switch Terminal
     this.terminal.setSymbol(sym);
   }
 
@@ -151,13 +141,16 @@ class CascadeTradingApp {
         }
         break;
 
+      case 'CASCADE_BURST':
+        this.radar.addCascadeBurst(msg.cascade);
+        break;
+
       case 'LIQUIDATION':
         this.radar.addLiquidation(msg.event);
         this.chart.onLiquidation(msg.event);
         this.orderflow.processLiquidation(msg.event);
         if (msg.armed) {
           this.armedSymbols[msg.event.symbol] = msg.armed;
-          this.radar.updateArmed(msg.event.symbol, msg.armed);
           if (msg.event.symbol === this.currentSymbol) {
             this.chart.setArmedZone(msg.armed);
           }

@@ -61,18 +61,36 @@
     <!-- 2. MAIN MULTI-PANE WORKSPACE -->
     <main class="main-workspace">
       
-      <!-- LEFT PANE: 2-STAGE PRECURSOR RADAR -->
+      <!-- LEFT PANE: DUAL EXCHANGE LIQUIDATION & CASCADE RADAR -->
       <aside class="left-pane">
-        <!-- 2-Stage Precursor Radar Subpanel -->
-        <section class="radar-subpanel" style="flex:1;">
+        <!-- 1. Cross-Exchange Cascade Burst Radar -->
+        <section class="radar-subpanel" style="flex: 0 0 auto; max-height: 45%;">
           <div class="panel-header">
-            <span class="panel-title">⏳ 2-Stage Precursor Radar</span>
-            <span style="font-size:10px; color:var(--text-muted);">8s TTL</span>
+            <span class="panel-title">💥 연쇄 폭포수 전이 레이더</span>
+            <span style="font-size:10px; color:var(--warn-amber);">Binance ➔ Bybit</span>
           </div>
-          <div class="panel-body" id="armedList">
-            <!-- Dynamic Armed Cards inserted here -->
-            <div style="color:var(--text-muted); font-size:11px; padding:12px; text-align:center;">
-              도화선 장전 대기 중 (Binance $200+ 감시)
+          <div class="panel-body" id="cascadeList" style="display:flex; flex-direction:column; gap:6px;">
+            <!-- Dynamic Cascade Burst Cards inserted here -->
+            <div id="cascadePlaceholder" style="color:var(--text-muted); font-size:11px; padding:12px; text-align:center;">
+              연쇄 청산 감시 중 (바이낸스 도화선 ➔ 바이비트 전이 포착)
+            </div>
+          </div>
+        </section>
+
+        <!-- 2. Dual-Exchange Real-Time Liquidation Feeds -->
+        <section class="radar-subpanel" style="flex: 1; display:flex; flex-direction:column;">
+          <div class="panel-header" style="padding:4px 8px;">
+            <div class="exchange-tabs">
+              <button id="tabBinance" class="tab-btn active">🟡 Binance 청산</button>
+              <button id="tabBybit" class="tab-btn">🟠 Bybit 청산</button>
+            </div>
+          </div>
+          <div class="panel-body" style="padding:4px; flex:1; overflow-y:auto;">
+            <div id="binanceFeedList" class="liq-feed-sublist">
+              <!-- Binance Liquidation Rows -->
+            </div>
+            <div id="bybitFeedList" class="liq-feed-sublist" style="display:none;">
+              <!-- Bybit Liquidation Rows -->
             </div>
           </div>
         </section>
