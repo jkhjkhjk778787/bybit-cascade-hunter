@@ -973,7 +973,7 @@ class CascadeTradingServer:
         try:
             balance = await asyncio.to_thread(self.trader.get_wallet_balance)
             positions = await asyncio.to_thread(self.trader.get_positions)
-            recent_liqs = self.liq_manager.get_recent_liquidations(limit=60)
+            recent_liqs = self.liq_manager.get_recent_liquidations(limit=8)
             await ws.send_str(orjson.dumps({
                 "type": "SNAPSHOT",
                 "balance": balance,

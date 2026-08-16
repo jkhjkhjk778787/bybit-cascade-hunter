@@ -116,6 +116,14 @@ export class RadarComponent {
       });
 
       this.cascadeListEl.prepend(card);
+      while (this.cascadeListEl.children.length > 4) {
+        const last = this.cascadeListEl.lastChild;
+        if (last && last.dataset && last.dataset.symbol) {
+          this.cascadeCards.delete(last.dataset.symbol);
+        }
+        this.cascadeListEl.removeChild(last);
+      }
+
       card._fillEl = card.querySelector('.progress-bar-fill');
       card._timeTextEl = card.querySelector('.cascade-time');
       this.cascadeCards.set(sym, card);
@@ -160,8 +168,8 @@ export class RadarComponent {
 
     targetFeed.prepend(row);
 
-    // Keep max 50 rows per column
-    while (targetFeed.children.length > 50) {
+    // 최대 4개만 깔끔하게 유지 (스크롤 압박 및 복잡도 제거)
+    while (targetFeed.children.length > 4) {
       targetFeed.removeChild(targetFeed.lastChild);
     }
   }
