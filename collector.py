@@ -494,6 +494,28 @@ class IntegratedMarketCollector:
                 t.cancel()
 
 
+def fetch_top_active_symbols(limit: int = 50) -> list[str]:
+    """Bybit 24시간 거래대금 상위 활성 심볼 자동 조회"""
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            "https://api.bybit.com/v5/market/tickers?category=linear",
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = orjson.loads(resp.read())
+        tickers = data.get("result", {}).get("list", [])
+        sorted_tickers = sorted(
+            [d for d in tickers if d.get("symbol", "").endswith("USDT") and "USDC" not in d.get("symbol", "")],
+            key=lambda x: float(x.get("turnover24h", 0) or 0),
+            reverse=True
+        )
+        return [d["symbol"] for d in sorted_tickers[:limit]]
+    except Exception as e:
+        log(f"[WARN] Bybit 상위 심볼 조회 실패: {e}")
+        return []
+
+
 async def main():
     parser = argparse.ArgumentParser(description="Bybit 체결 + 3대 거래소 청산 통합 수집 엔진")
     parser.add_argument("--symbol", type=str, default=None, help="추가 심볼 (지정하지 않으면 DB 기존 심볼 자동 로드)")
@@ -502,15 +524,19 @@ async def main():
 
     db_mgr = TradeDBManager(args.db)
     
-    # 1. DB에 이미 존재하는 기존 모든 심볼 자동 로드 (ACEUSDT, COWUSDT 등 30종 전체)
+    # 1. DB 기존 심볼 + 거래대금 상위 50개 심볼 병합 자동 로드
     existing_syms = set(db_mgr.get_existing_symbols())
+    top_syms = fetch_top_active_symbols(limit=getattr(config, "TOP_SYMBOLS_LIMIT", 50))
+    for s in top_syms:
+        existing_syms.add(s.upper())
+
     if args.symbol:
         existing_syms.add(args.symbol.upper())
     if config.DEFAULT_SYMBOL:
         existing_syms.add(config.DEFAULT_SYMBOL.upper())
 
     all_symbols = sorted(list(existing_syms))
-    log(f"[*] 기존 DB 및 설정에서 {len(all_symbols)}개 심볼 자동 로드 완료: {', '.join(all_symbols)}")
+    log(f"[*] 기존 DB 및 거래대금 상위 {len(all_symbols)}개 심볼 자동 로드 완료: {', '.join(all_symbols)}")
 
     collector = IntegratedMarketCollector(initial_symbols=all_symbols, db_manager=db_mgr)
 

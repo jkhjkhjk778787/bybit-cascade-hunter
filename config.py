@@ -16,9 +16,10 @@ DB_PATH = "bybit_trades.duckdb"
 # -------------------------------------------------------------
 ENABLE_RANKER_SCANNER = True
 RANKER_API_URL = "http://localhost:3000/api/volume-ranking"
-RANK_LIMIT = 10              # 상위 순위 범위 (1위 ~ 10위)
-MIN_PRICE_CHANGE_PCT = 0.5   # 1분 변동률 기준 (%) (|변동률| >= 0.5)
-SCAN_INTERVAL_SEC = 60       # 랭커 갱신 주기 (60초 = 1분)
+TOP_SYMBOLS_LIMIT = 50        # 상시 틱 수집 거래대금 상위 심볼 수 (50개)
+RANK_LIMIT = 50               # 상위 순위 범위 (1위 ~ 50위)
+MIN_PRICE_CHANGE_PCT = 0.5    # 1분 변동률 기준 (%) (|변동률| >= 0.5)
+SCAN_INTERVAL_SEC = 60        # 랭커 갱신 주기 (60초 = 1분)
 
 # -------------------------------------------------------------
 # 3대 거래소 (Binance / Bybit / OKX) 청산 데이터 수집 설정

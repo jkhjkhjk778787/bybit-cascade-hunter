@@ -92,7 +92,7 @@ class HotSymbolRadar:
                     candidates.append((sym, turnover, price_24h_pct, score))
 
             candidates.sort(key=lambda x: x[3], reverse=True)
-            top_symbols = [c[0] for c in candidates[:12]]
+            top_symbols = [c[0] for c in candidates[:40]]
             return top_symbols
         except Exception as e:
             logger.error(f"레이더 스캔 실패: {e}")
