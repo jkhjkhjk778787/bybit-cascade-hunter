@@ -1,6 +1,6 @@
 /**
- * Cascade Radar & Dual-Exchange Liquidation Feed Module
- * 바이낸스 청산 ➔ 바이비트 전이 청산 실시간 포착 및 강조 컴포넌트
+ * Cascade Radar & Dual-Exchange Concurrent Liquidation Feed Module
+ * 바이낸스 청산 및 바이비트 청산 동시 병렬 감시 & 연쇄 전이 강조 컴포넌트
  */
 
 export class RadarComponent {
@@ -10,29 +10,7 @@ export class RadarComponent {
     this.bybitFeedEl = document.getElementById(bybitFeedId);
 
     this.cascadeCards = new Map(); // symbol -> DOMElement
-    this.initTabs();
     this.initTimerLoop();
-  }
-
-  initTabs() {
-    const tabBinance = document.getElementById('tabBinance');
-    const tabBybit = document.getElementById('tabBybit');
-
-    if (tabBinance && tabBybit) {
-      tabBinance.addEventListener('click', () => {
-        tabBinance.classList.add('active');
-        tabBybit.classList.remove('active');
-        if (this.binanceFeedEl) this.binanceFeedEl.style.display = 'block';
-        if (this.bybitFeedEl) this.bybitFeedEl.style.display = 'none';
-      });
-
-      tabBybit.addEventListener('click', () => {
-        tabBybit.classList.add('active');
-        tabBinance.classList.remove('active');
-        if (this.bybitFeedEl) this.bybitFeedEl.style.display = 'block';
-        if (this.binanceFeedEl) this.binanceFeedEl.style.display = 'none';
-      });
-    }
   }
 
   initTimerLoop() {
@@ -80,7 +58,7 @@ export class RadarComponent {
       card.innerHTML = `
         <div class="cascade-top">
           <div style="display:flex; align-items:center; gap:6px;">
-            <span style="font-size:15px; font-weight:800; font-family:var(--font-mono); color:var(--text-primary);">${sym}</span>
+            <span style="font-size:14px; font-weight:800; font-family:var(--font-mono); color:var(--text-primary);">${sym}</span>
             <span class="cascade-badge">💥 CASCADE LINKED</span>
           </div>
           <span class="cascade-time" style="font-size:11px; font-weight:700; color:var(--warn-amber);">15.0s</span>
@@ -147,20 +125,22 @@ export class RadarComponent {
     const isHuge = usd >= 5000;
     const isCascade = event.is_cascade;
 
-    const timeStr = new Date(event.timestamp).toLocaleTimeString();
+    const timeStr = new Date(event.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
     row.className = `liq-row ${rowClass} ${isCascade ? 'cascade-linked' : ''}`;
     row.style.cursor = 'pointer';
-    row.title = `${event.symbol} 차트 및 주문 터미널로 즉시 전환`;
+    row.title = `${event.symbol} (${exch.toUpperCase()}) 차트 및 주문 터미널로 즉시 전환`;
     row.innerHTML = `
-      <span class="liq-exch-badge ${exch}">${exch}</span>
-      <span style="font-weight:700;">${event.symbol}</span>
-      <span style="color:${isLong ? 'var(--short-red)' : 'var(--long-green)'}; font-weight:700;">
-        ${sideText} ${isCascade ? '💥' : ''}
-      </span>
-      <span class="liq-usd ${isHuge ? 'huge' : ''}">$${Math.round(usd).toLocaleString()}</span>
-      <span style="color:var(--text-muted);">${event.price?.toFixed(event.price > 10 ? 2 : 4) || '-'}</span>
-      <span style="color:var(--text-muted); font-size:10px;">${timeStr}</span>
+      <div class="feed-row-top">
+        <span style="font-weight:800; color:var(--text-primary); font-size:12px;">${event.symbol}</span>
+        <span class="liq-usd ${isHuge ? 'huge' : ''}">$${Math.round(usd).toLocaleString()}</span>
+      </div>
+      <div class="feed-row-bottom">
+        <span style="color:${isLong ? 'var(--short-red)' : 'var(--long-green)'}; font-weight:700;">
+          ${sideText} ${isCascade ? '💥 LINK' : ''}
+        </span>
+        <span style="color:var(--text-muted); font-size:10px;">${timeStr}</span>
+      </div>
     `;
 
     row.addEventListener('click', () => {
@@ -169,7 +149,7 @@ export class RadarComponent {
 
     targetFeed.prepend(row);
 
-    // Keep max 50 rows per feed
+    // Keep max 50 rows per column
     while (targetFeed.children.length > 50) {
       targetFeed.removeChild(targetFeed.lastChild);
     }

@@ -234,7 +234,7 @@ html, body {
    ========================================================================== */
 .main-workspace {
   display: grid;
-  grid-template-columns: 320px 1fr 350px;
+  grid-template-columns: 440px 1fr 340px;
   grid-template-rows: 100%;
   grid-template-areas: "left center right";
   flex: 1;
@@ -257,17 +257,14 @@ html, body {
   align-items: center;
   justify-content: space-between;
   padding: 8px 12px;
-  background-color: var(--bg-surface-elevated);
+  background: var(--bg-surface-elevated);
   border-bottom: 1px solid var(--border-subtle);
-  flex-shrink: 0;
 }
 
 .panel-title {
   font-size: 12px;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -280,48 +277,98 @@ html, body {
 }
 
 /* ==========================================================================
-   LEFT COLUMN: RADAR & SYMBOL MATRIX
+   LEFT COLUMN: RADAR & DUAL LIQUIDATION FEEDS
    ========================================================================== */
 .left-pane {
   grid-area: left;
+  background-color: var(--bg-surface);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   gap: 1px;
-  background-color: var(--border-subtle);
 }
 
 .radar-subpanel {
-  flex: 1;
   background-color: var(--bg-surface);
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
-/* Exchange Tabs */
-.exchange-tabs {
-  display: flex;
-  gap: 4px;
-  width: 100%;
+/* Dual Side-by-Side Liquidation Columns */
+.dual-feed-columns {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background-color: var(--border-subtle);
+  overflow: hidden;
+  height: 100%;
 }
 
-.tab-btn {
+.feed-column {
   flex: 1;
-  padding: 5px 8px;
-  font-size: 11px;
-  font-weight: 700;
-  border: 1px solid var(--border-subtle);
-  background: var(--bg-surface-elevated);
-  color: var(--text-muted);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 4px;
+  background-color: var(--bg-surface);
+}
+
+/* Compact Liquidation Card inside Column */
+.feed-column .liq-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 5px 7px;
   border-radius: var(--radius-sm);
+  background: var(--bg-surface-elevated);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  border-left: 3px solid transparent;
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
-.tab-btn.active {
+.feed-column .liq-row:hover {
   background: var(--bg-surface-subtle);
-  color: var(--text-primary);
+  transform: translateX(1px);
   border-color: var(--border-strong);
+}
+
+.feed-column .liq-row.long-liq {
+  border-left-color: var(--short-red);
+}
+
+.feed-column .liq-row.short-liq {
+  border-left-color: var(--long-green);
+}
+
+.feed-column .liq-row.cascade-linked {
+  background: linear-gradient(135deg, hsla(38, 92%, 52%, 0.22) 0%, var(--bg-surface-elevated) 100%);
+  border-left: 3px solid var(--warn-amber);
+  box-shadow: 0 0 10px hsla(38, 92%, 52%, 0.35);
+  animation: pulse-linked 1.2s infinite alternate;
+}
+
+@keyframes pulse-linked {
+  0% { box-shadow: 0 0 6px hsla(38, 92%, 52%, 0.2); }
+  100% { box-shadow: 0 0 14px hsla(38, 92%, 52%, 0.45); }
+}
+
+.feed-row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.feed-row-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--text-muted);
 }
 
 /* Cascade Burst Card (Cross-Exchange Linkage) */
