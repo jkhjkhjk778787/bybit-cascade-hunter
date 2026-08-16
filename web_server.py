@@ -772,30 +772,40 @@ class CVDSlopeTracker:
                     if now - b_time <= 4.0 and b_side == side:
                         is_byb_transition = True
 
-            # [특징 3] 가격-거래량 가성비 4대 퀀트 진단
+            # [특징 3] 🎯 4대 핵심 퀀트 중요 이벤트만 엄격 필터링 (일반 노이즈는 전면 배제)
+            event_class = None
             if is_buy:
-                if dp_pct >= 0.05:
-                    insight = f"🚀 진성 돌파 ({accel_ratio}x 가속)" + (" [수렴탈출]" if is_squeeze else "")
-                elif dp_pct <= 0.015:
+                if dp_pct <= 0.018:
+                    # 1. 🪤 아이스버그 숏 트랩 (매수 흡수 완제 ➔ 숏 최우선)
+                    event_class = "ICEBERG_SHORT_TRAP"
                     insight = f"🪤 숏 트랩 (매수흡수·윗벽)" + (" [수렴]" if is_squeeze else "")
-                else:
-                    insight = f"🟢 순매수 급증 ({accel_ratio}x)"
+                elif dp_pct >= 0.045:
+                    # 2. 🚀 진성 상방 돌파 (진성 매수 모멘텀)
+                    event_class = "TRUE_BULL_BREAKOUT"
+                    insight = f"🚀 진성 돌파 ({accel_ratio}x 가속)" + (" [수렴탈출]" if is_squeeze else "")
             else:
-                if dp_pct <= -0.05:
+                if dp_pct >= -0.018:
+                    # 3. ⚠️ 지지선 흡수 중 (붕괴 주의 / 롱 스퀴즈)
+                    event_class = "SUPPORT_ABSORPTION"
+                    insight = f"⚠️ 지지선 흡수 (붕괴주의)"
+                elif dp_pct <= -0.045:
+                    # 4. 🔴 지지선 파열 덤핑 (하방 폭포수 가속)
+                    event_class = "WATERFALL_DUMP"
                     insight = f"🔴 파열 덤핑 ({accel_ratio}x 가속)" + (" [수렴이탈]" if is_squeeze else "")
-                elif dp_pct >= -0.015:
-                    insight = f"⚠️ 지지선 흡수 중 (붕괴주의)"
-                else:
-                    insight = f"🔴 순매도 급증 ({accel_ratio}x)"
+
+            # 4대 중요 이벤트 또는 선행 전이에 해당하지 않는 단순 거래량 노이즈는 전면 차단
+            if not event_class and not is_byb_transition:
+                return None
 
             if is_byb_transition:
-                insight = "⚡ [선행전이] " + insight
+                insight = "⚡ [선행전이] " + (insight if event_class else "바이낸스 도화선 전이")
             elif is_bin_spark:
-                insight = " 도화선 " + insight
+                insight = " 도화선 " + (insight if event_class else "기울기 급변")
 
             return {
                 "exchange": exchange,
                 "symbol": symbol,
+                "event_class": event_class or "LEAD_TRANSITION",
                 "slope_usd_sec": round(slope_3s, 1),
                 "z_score": round(z_score, 1),
                 "side": side,

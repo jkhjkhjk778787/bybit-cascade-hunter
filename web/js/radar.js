@@ -183,7 +183,8 @@ export class RadarComponent {
 
     const row = document.createElement('div');
     const isBuy = event.side === 'buy' || (event.slope_usd_sec || 0) > 0;
-    const isTrap = event.insight && event.insight.includes('트랩');
+    const evClass = event.event_class || '';
+    const isTrap = evClass === 'ICEBERG_SHORT_TRAP' || evClass === 'SUPPORT_ABSORPTION';
     const isLeadLag = event.is_lead_lag;
     const rowClass = isTrap ? 'trap-burst' : (isLeadLag ? 'lead-burst' : (isBuy ? 'buy-burst' : 'sell-burst'));
     const slopeRate = Math.abs(event.slope_usd_sec || 0);
@@ -197,7 +198,7 @@ export class RadarComponent {
 
     row.className = `cvd-peak-row ${rowClass}`;
     row.style.cursor = 'pointer';
-    row.title = `${event.symbol} (${exch.toUpperCase()}) CVD 기울기 피크 (${rateStr}) - 클릭 시 차트 즉시 전환`;
+    row.title = `${event.symbol} (${exch.toUpperCase()}) ${event.insight || 'CVD 피크'} - 클릭 시 차트 즉시 전환`;
     row.dataset.symbol = event.symbol;
     row.innerHTML = `
       <div class="feed-row-top">
@@ -209,7 +210,7 @@ export class RadarComponent {
       </div>
       <div class="feed-row-bottom">
         <span class="feed-side" style="color:${isTrap ? 'var(--warn-amber)' : (isBuy ? 'var(--long-green)' : 'var(--short-red)')};">
-          ${event.insight || (isBuy ? '🚀 매수 가속' : '🔴 덤핑 가속')} ${zScore ? `(${zScore})` : ''}
+          ${event.insight || 'CVD 피크'} ${zScore ? `(${zScore})` : ''}
         </span>
         <span class="feed-time">${timeStr}</span>
       </div>
