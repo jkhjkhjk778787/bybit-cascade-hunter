@@ -442,6 +442,9 @@ class CascadeTradingServer:
                     logger.error(f"티커 구독 해제 실패: {e}")
             if added:
                 try:
+                    for s in added:
+                        spec = self.trader.get_symbol_spec(s)
+                        logger.info(f"🔍 [신규 심볼 규격 검증] {s}: 최대레버리지 {spec.get('max_leverage')}x | minQty {spec.get('min_qty')} | qtyStep {spec.get('qty_step')} | minNotional ${spec.get('min_notional')}")
                     add_topics = [f"tickers.{s}" for s in added]
                     await self.ticker_ws.send_str(orjson.dumps({"op": "subscribe", "args": add_topics}).decode('utf-8'))
                     logger.info(f"✨ [Bybit Ticker Stream] TOP 20 신규 진입 심볼 구독 등록: {', '.join(added)}")
@@ -453,6 +456,8 @@ class CascadeTradingServer:
         if not symbol or symbol in self.subscribed_ticker_symbols:
             return
         self.subscribed_ticker_symbols.add(symbol)
+        spec = self.trader.get_symbol_spec(symbol)
+        logger.info(f"🔍 [온디맨드 심볼 규격 검증] {symbol}: 최대레버리지 {spec.get('max_leverage')}x | minQty {spec.get('min_qty')} | qtyStep {spec.get('qty_step')}")
         if self.ticker_ws and not self.ticker_ws.closed:
             try:
                 await self.ticker_ws.send_str(orjson.dumps({"op": "subscribe", "args": [f"tickers.{symbol}"]}).decode('utf-8'))

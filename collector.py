@@ -137,6 +137,44 @@ class IntegratedMarketCollector:
         self.detected_history = []
         self.symbol_stats = defaultdict(lambda: {"ticks": 0, "volume": 0.0, "last_price": 0.0, "last_time": ""})
         self.liq_stats = defaultdict(lambda: {"long_liq_usd": 0.0, "short_liq_usd": 0.0, "count": 0, "last_time": ""})
+        self.symbol_meta_cache = {}
+
+        # 초기 심볼 전수 스펙 검증
+        for s in self.subscribed_symbols:
+            self.check_and_cache_symbol_spec(s)
+
+    def check_and_cache_symbol_spec(self, symbol: str) -> dict:
+        """심볼이 DB에 적재되거나 수집 대상에 진입할 때마다 Bybit 규격(최대 레버리지, 최소 수량 등) 검증 및 캐싱"""
+        if symbol in self.symbol_meta_cache:
+            return self.symbol_meta_cache[symbol]
+        try:
+            import urllib.request
+            url = f"https://api.bybit.com/v5/market/instruments-info?category=linear&symbol={symbol}"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                data = orjson.loads(resp.read())
+                items = data.get("result", {}).get("list", [])
+                if items:
+                    it = items[0]
+                    lsf = it.get("lotSizeFilter", {})
+                    lf = it.get("leverageFilter", {})
+                    max_lev = float(lf.get("maxLeverage", 20.0))
+                    min_q = float(lsf.get("minOrderQty", 0.001))
+                    step = float(lsf.get("qtyStep", 0.001))
+                    min_not = float(lsf.get("minNotionalValue", 5.0))
+                    meta = {
+                        "max_leverage": max_lev,
+                        "min_qty": min_q,
+                        "qty_step": step,
+                        "min_notional": min_not,
+                        "status": it.get("status", "Trading")
+                    }
+                    self.symbol_meta_cache[symbol] = meta
+                    log(f"🔍 [DB 수집 심볼 검증 완료] {symbol}: 최대레버리지 {max_lev}x | minQty {min_q} | qtyStep {step} | minNotional ${min_not} | 상태: {meta['status']}")
+                    return meta
+        except Exception as e:
+            log(f"[WARN] {symbol} 스펙 검증 실패: {e}")
+        return {"max_leverage": 20.0, "min_qty": 0.001, "qty_step": 0.001, "min_notional": 5.0, "status": "Unknown"}
 
     async def subscribe_symbols(self, new_symbols: list[str]):
         to_add = [s.upper() for s in new_symbols if s.upper() not in self.subscribed_symbols]
@@ -145,6 +183,7 @@ class IntegratedMarketCollector:
 
         for s in to_add:
             self.subscribed_symbols.add(s)
+            self.check_and_cache_symbol_spec(s)
 
         # 1. Bybit 체결 틱 웹소켓 구독 추가 (10개씩 배치 분할)
         if self.ws is not None and not self.ws.closed:
