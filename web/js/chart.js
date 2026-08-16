@@ -84,6 +84,9 @@ export class ProChart {
 
   /* ── public API ── */
   setSymbol(sym) {
+    if (this.symbol === sym && this.ticks1s.length >= 2) {
+      return;
+    }
     this.symbol = sym;
     this.candles1m = [];
     this.ticks1s = [];
@@ -117,8 +120,9 @@ export class ProChart {
     });
 
     const cutoff = now - 180_000;
-    const idx = this.cvdPoints.findIndex(p => p.t >= cutoff);
-    if (idx > 0) this.cvdPoints.splice(0, idx);
+    while (this.cvdPoints.length > 2 && this.cvdPoints[0].t < cutoff) {
+      this.cvdPoints.shift();
+    }
 
     if (this._cvdBinLegendEl) {
       const bSign = this.binanceCvd >= 0 ? '+' : '';
@@ -149,8 +153,9 @@ export class ProChart {
 
     // Keep last 180 seconds rolling window
     const cutoff = now - 180_000;
-    const idx = this.cvdPoints.findIndex(p => p.t >= cutoff);
-    if (idx > 0) this.cvdPoints.splice(0, idx);
+    while (this.cvdPoints.length > 2 && this.cvdPoints[0].t < cutoff) {
+      this.cvdPoints.shift();
+    }
 
     // Update legend
     if (this._cvdBinLegendEl) {
@@ -174,11 +179,16 @@ export class ProChart {
 
     // push tick
     this.ticks1s.push({ t: ms, p: tick.price });
-    // keep last 120 seconds
+
+    // 120초 윈도우 안전 슬라이딩 (앞쪽 오래된 틱만 안전 제거, 절대 전체 리셋 금지!)
     const cutoff = ms - 120_000;
-    const idx = this.ticks1s.findIndex(t => t.t >= cutoff);
-    if (idx > 0) this.ticks1s.splice(0, idx);
-    else if (idx === -1) this.ticks1s.length = 0;
+    while (this.ticks1s.length > 2 && this.ticks1s[0].t < cutoff) {
+      this.ticks1s.shift();
+    }
+    // 대량 거래량 폭주시 메모리 보호 (최대 1000개 보존)
+    if (this.ticks1s.length > 1000) {
+      this.ticks1s.splice(0, this.ticks1s.length - 1000);
+    }
 
     // update live candle
     const minTs = Math.floor(ms / 60000) * 60000;
@@ -295,19 +305,6 @@ export class ProChart {
       ctx.fillStyle = col;
       ctx.fillRect(x - bw / 2, t, bw, Math.max(2, b - t));
     });
-
-    // liquidation markers on candles
-    const firstT = candles[0].t;
-    const lastT = candles[n - 1].t + 60000;
-    for (const liq of this.liquidations) {
-      if (liq.t < firstT || liq.t > lastT) continue;
-      // find matching candle
-      const liqMin = Math.floor(liq.t / 60000) * 60000;
-      const matchX = xMap.get(liqMin);
-      const x = matchX != null ? matchX : this.pad.left + ((liq.t - firstT) / (lastT - firstT)) * pW;
-      const y = yOf(liq.p);
-      this._liqMark(ctx, x, y, liq, h);
-    }
 
     // price line
     this._priceLine(ctx, w, yOf(this.latestPrice), null);

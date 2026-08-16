@@ -78,6 +78,7 @@ class CascadeTradingApp {
 
   selectSymbol(sym) {
     if (!sym) return;
+    const isDifferent = this.currentSymbol !== sym;
     this.currentSymbol = sym;
 
     // 1. Header Name & Price
@@ -91,17 +92,17 @@ class CascadeTradingApp {
       }
     }
 
-    // 2. Switch Chart & Armed Status
-    this.chart.setSymbol(sym);
-    const armed = this.armedSymbols[sym];
-    if (armed && (Date.now() / 1000 <= armed.expires)) {
-      this.chart.setArmedZone(armed);
-    } else {
-      this.chart.setArmedZone(null);
+    // 2. Switch Chart & Terminal only when switching to a different symbol
+    if (isDifferent) {
+      this.chart.setSymbol(sym);
+      const armed = this.armedSymbols[sym];
+      if (armed && (Date.now() / 1000 <= armed.expires)) {
+        this.chart.setArmedZone(armed);
+      } else {
+        this.chart.setArmedZone(null);
+      }
+      this.terminal.setSymbol(sym);
     }
-
-    // 3. Switch Terminal
-    this.terminal.setSymbol(sym);
   }
 
   connectWebSocket() {
