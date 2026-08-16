@@ -234,12 +234,11 @@ html, body {
    ========================================================================== */
 .main-workspace {
   display: grid;
-  grid-template-columns: 320px 1fr 340px;
-  grid-template-rows: 1fr 200px;
-  grid-template-areas: 
-    "left center right"
-    "left bottom right";
+  grid-template-columns: 320px 1fr 350px;
+  grid-template-rows: 100%;
+  grid-template-areas: "left center right";
   flex: 1;
+  height: calc(100vh - 48px);
   overflow: hidden;
   gap: 1px;
   background-color: var(--border-subtle);
