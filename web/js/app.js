@@ -2,11 +2,11 @@
  * Master Application Controller & WebSocket Connection Manager
  */
 
-import { ProChart } from './chart.js?v=20260817_0433';
-import { RadarComponent } from './radar.js?v=20260817_0433';
-import { TerminalComponent } from './terminal.js?v=20260817_0433';
-import { OrderflowComponent } from './orderflow.js?v=20260817_0433';
-import { LiquidationsComponent } from './liquidations.js?v=20260817_0433';
+import { ProChart } from './chart.js?v=20260817_0437';
+import { RadarComponent } from './radar.js?v=20260817_0437';
+import { TerminalComponent } from './terminal.js?v=20260817_0437';
+import { OrderflowComponent } from './orderflow.js?v=20260817_0437';
+import { LiquidationsComponent } from './liquidations.js?v=20260817_0437';
 
 class CascadeTradingApp {
   constructor() {

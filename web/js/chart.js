@@ -34,9 +34,6 @@ export class ProChart {
     this._longLiqSumEl = document.getElementById('centerLongLiqSum');
     this._shortLiqSumEl = document.getElementById('centerShortLiqSum');
     this._tooltipEl = document.getElementById('centerLiqTooltip');
-    this._peakPillEl = document.getElementById('liqPeakPill');
-    this._biasPillEl = document.getElementById('liqBiasPill');
-    this._insightTextEl = document.getElementById('liqInsightText');
 
     this.peakCluster = null;
     this.quantInsight = null;
@@ -236,26 +233,6 @@ export class ProChart {
       }
       if (this._shortLiqSumEl) {
         this._shortLiqSumEl.textContent = `🟢 숏 $${this._fmtUsd(this.liqSummary.short_usd || 0)}`;
-      }
-
-      // Update Quant Insight Banner
-      if (this._peakPillEl) {
-        if (this.peakCluster && this.peakCluster.peak_usd > 0) {
-          this._peakPillEl.innerHTML = `🔥 피크: <b>${this.peakCluster.time_str}</b> ($${this._fmtUsd(this.peakCluster.peak_usd)}, ${this.peakCluster.peak_pct}%)`;
-          this._peakPillEl.style.display = 'inline-flex';
-        } else {
-          this._peakPillEl.innerHTML = `🔥 피크: 집계 대기 중`;
-        }
-      }
-
-      if (this._biasPillEl) {
-        this._biasPillEl.textContent = this.quantInsight?.bias || '⚖️ 롱/숏 균형';
-      }
-
-      if (this._insightTextEl) {
-        const headline = this.quantInsight?.headline || `${this.symbol} 청산 데이터 감시 중`;
-        const action = this.quantInsight?.action_strategy || '';
-        this._insightTextEl.innerHTML = `<b>${headline}</b> <span style="color:var(--text-muted); margin:0 4px;">|</span> <span style="color:var(--brand-cyan);">💡 ${action}</span>`;
       }
 
       this._requestRender(true, false, false);
