@@ -774,10 +774,6 @@ class CascadeTradingServer:
         self.is_running = True
         self.auto_trade_enabled = False
 
-    @property
-    def ws_clients(self) -> Set[web.WebSocketResponse]:
-        return set(self.client_writers.keys())
-
         self._http_session: Optional[ClientSession] = None
         self._chart_cache = OrderedDict()
         self._active_symbols_cache = {}
@@ -807,6 +803,10 @@ class CascadeTradingServer:
         self.liq_manager.sync_from_disk_snapshot()
 
         self.setup_routes()
+
+    @property
+    def ws_clients(self) -> Set[web.WebSocketResponse]:
+        return set(self.client_writers.keys())
 
     async def update_top_20_subscriptions(self, new_top20: List[str]):
         """상위 20개 심볼 갱신: 진입 심볼 신규 구독 (기존 심볼 구독 유지)"""
