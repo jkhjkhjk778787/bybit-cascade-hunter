@@ -13,6 +13,7 @@ class CascadeTradingApp {
     this.activeSymbolsData = null;
     this.latestPrices = {};
     this.armedSymbols = {};
+    this.openPositions = [];
     this.ws = null;
     this.reconnectTimer = null;
 
@@ -132,9 +133,14 @@ class CascadeTradingApp {
     };
   }
 
+  hasOpenPosition() {
+    return Array.isArray(this.openPositions) && this.openPositions.some(p => Math.abs(parseFloat(p.size || 0)) > 0);
+  }
+
   handleWsMessage(msg) {
     switch (msg.type) {
       case 'SNAPSHOT':
+        this.openPositions = msg.positions || [];
         this.updateAccountSummary(msg.balance, msg.positions);
         this.terminal.updatePositions(msg.positions);
         if (msg.prices) Object.assign(this.latestPrices, msg.prices);
@@ -147,8 +153,12 @@ class CascadeTradingApp {
       case 'CASCADE_BURST':
         this.radar.addCascadeBurst(msg.cascade);
         if (msg.cascade?.symbol) {
-          this.selectSymbol(msg.cascade.symbol);
-          this.terminal.showToast(`🚨 [트리거 발동] ${msg.cascade.symbol} 차트로 즉시 자동 전환!`, 'warn');
+          if (this.hasOpenPosition()) {
+            this.terminal.showToast(`💥 [연쇄 트리거] ${msg.cascade.symbol} 포착 (보유 포지션 보호로 화면 유지)`, 'info');
+          } else {
+            this.selectSymbol(msg.cascade.symbol);
+            this.terminal.showToast(`🚨 [트리거 발동] ${msg.cascade.symbol} 차트로 즉시 자동 전환!`, 'warn');
+          }
         }
         break;
 
@@ -163,8 +173,10 @@ class CascadeTradingApp {
           }
         }
         if (msg.event?.is_cascade && msg.event.symbol && msg.event.symbol !== this.currentSymbol) {
-          this.selectSymbol(msg.event.symbol);
-          this.terminal.showToast(`⚡ [연쇄 청산] ${msg.event.symbol} 차트로 자동 전환!`, 'warn');
+          if (!this.hasOpenPosition()) {
+            this.selectSymbol(msg.event.symbol);
+            this.terminal.showToast(`⚡ [연쇄 청산] ${msg.event.symbol} 차트로 자동 전환!`, 'warn');
+          }
         }
         break;
 
@@ -181,6 +193,7 @@ class CascadeTradingApp {
         break;
 
       case 'ACCOUNT_UPDATE':
+        this.openPositions = msg.positions || [];
         this.updateAccountSummary(msg.balance, msg.positions);
         this.terminal.updatePositions(msg.positions);
         break;
@@ -188,6 +201,7 @@ class CascadeTradingApp {
   }
 
   updateAccountSummary(balance, positions) {
+    this.openPositions = positions || [];
     if (!balance) return;
     const equityEl = document.getElementById('accountEquity');
     const availEl = document.getElementById('accountAvailable');
