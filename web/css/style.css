@@ -1,0 +1,797 @@
+/* ==========================================================================
+   CASCADE PRO TRADING SUITE - DESIGN SYSTEM & STYLESHEET
+   Pure Vanilla CSS with HSL Tokens, Glassmorphism, & High-Performance Layout
+   ========================================================================== */
+
+:root {
+  /* Surface & Background Colors */
+  --bg-app: hsl(222, 47%, 6%);
+  --bg-surface: hsl(222, 44%, 10%);
+  --bg-surface-elevated: hsl(222, 40%, 13%);
+  --bg-surface-subtle: hsl(222, 38%, 16%);
+  --bg-overlay: hsla(222, 47%, 6%, 0.85);
+
+  /* Borders & Dividers */
+  --border-subtle: hsl(222, 25%, 18%);
+  --border-strong: hsl(222, 25%, 26%);
+  --border-focus: hsl(210, 100%, 60%);
+
+  /* Typography Colors */
+  --text-primary: hsl(210, 40%, 96%);
+  --text-secondary: hsl(215, 20%, 70%);
+  --text-muted: hsl(215, 16%, 48%);
+  --text-inverse: hsl(222, 47%, 6%);
+
+  /* Brand & Trading Accents */
+  --long-green: hsl(152, 76%, 46%);
+  --long-green-glow: hsla(152, 76%, 46%, 0.2);
+  --long-green-bg: hsla(152, 76%, 46%, 0.12);
+
+  --short-red: hsl(352, 85%, 58%);
+  --short-red-glow: hsla(352, 85%, 58%, 0.2);
+  --short-red-bg: hsla(352, 85%, 58%, 0.12);
+
+  --warn-amber: hsl(38, 92%, 52%);
+  --warn-amber-bg: hsla(38, 92%, 52%, 0.15);
+
+  --accent-cyan: hsl(192, 95%, 50%);
+  --accent-cyan-bg: hsla(192, 95%, 50%, 0.12);
+
+  --binance-yellow: hsl(48, 96%, 53%);
+  --bybit-gold: hsl(35, 95%, 54%);
+  --okx-blue: hsl(212, 100%, 55%);
+
+  /* Fonts */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6);
+
+  /* Radii */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+}
+
+/* Reset & Base Setup */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background-color: var(--bg-app);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* App Container */
+.app-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+}
+
+/* ==========================================================================
+   HEADER BAR
+   ========================================================================== */
+.header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 48px;
+  padding: 0 16px;
+  background-color: var(--bg-surface);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.brand-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logo-badge {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.logo-badge span {
+  color: var(--accent-cyan);
+}
+
+.tag-version {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  background: var(--bg-surface-subtle);
+  color: var(--text-muted);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+}
+
+.connection-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.conn-pill {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+}
+
+.conn-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--text-muted);
+}
+
+.conn-dot.online {
+  background-color: var(--long-green);
+  box-shadow: 0 0 8px var(--long-green);
+}
+
+.account-summary {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.summary-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.summary-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.summary-value {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.summary-value.positive { color: var(--long-green); }
+.summary-value.negative { color: var(--short-red); }
+
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.btn-autotrade {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-surface-elevated);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-autotrade.active {
+  background: var(--warn-amber-bg);
+  border-color: var(--warn-amber);
+  color: var(--warn-amber);
+}
+
+.btn-emergency-close {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--short-red);
+  background: var(--short-red-bg);
+  color: var(--short-red);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-emergency-close:hover {
+  background: var(--short-red);
+  color: white;
+}
+
+/* ==========================================================================
+   MAIN MULTI-PANE WORKSPACE
+   ========================================================================== */
+.main-workspace {
+  display: grid;
+  grid-template-columns: 320px 1fr 340px;
+  grid-template-rows: 1fr 200px;
+  grid-template-areas: 
+    "left center right"
+    "left bottom right";
+  flex: 1;
+  overflow: hidden;
+  gap: 1px;
+  background-color: var(--border-subtle);
+}
+
+/* Panels */
+.panel {
+  background-color: var(--bg-surface);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background-color: var(--bg-surface-elevated);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.panel-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+/* ==========================================================================
+   LEFT COLUMN: RADAR & SYMBOL MATRIX
+   ========================================================================== */
+.left-pane {
+  grid-area: left;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background-color: var(--border-subtle);
+}
+
+.radar-subpanel {
+  flex: 1;
+  background-color: var(--bg-surface);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.armed-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.armed-card {
+  padding: 8px 10px;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: relative;
+  overflow: hidden;
+}
+
+.armed-card.short-target {
+  border-left: 3px solid var(--short-red);
+}
+
+.armed-card.long-target {
+  border-left: 3px solid var(--long-green);
+}
+
+.armed-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.armed-sym {
+  font-weight: 700;
+  font-size: 13px;
+  font-family: var(--font-mono);
+}
+
+.armed-tag {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.armed-tag.sell { background: var(--short-red-bg); color: var(--short-red); }
+.armed-tag.buy { background: var(--long-green-bg); color: var(--long-green); }
+
+.armed-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.progress-bar-container {
+  width: 100%;
+  height: 4px;
+  background: var(--bg-surface-subtle);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: var(--warn-amber);
+  transition: width 0.1s linear;
+}
+
+/* Symbol Matrix Table */
+.symbol-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.symbol-table th {
+  text-align: left;
+  padding: 6px 8px;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  background: var(--bg-surface-elevated);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.symbol-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-family: var(--font-mono);
+}
+
+.symbol-table tr {
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.symbol-table tr:hover, .symbol-table tr.selected {
+  background-color: var(--bg-surface-elevated);
+}
+
+.symbol-table .win-rate-pill {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-weight: 700;
+}
+
+.win-rate-pill.high { background: var(--long-green-bg); color: var(--long-green); }
+.win-rate-pill.med { background: var(--warn-amber-bg); color: var(--warn-amber); }
+.win-rate-pill.low { background: var(--short-red-bg); color: var(--short-red); }
+
+/* ==========================================================================
+   CENTER COLUMN: PRO CHART & ORDERFLOW ABSORPTION
+   ========================================================================== */
+.center-pane {
+  grid-area: center;
+  background-color: var(--bg-surface);
+  display: flex;
+  flex-direction: column;
+}
+
+.chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: var(--bg-surface-elevated);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.chart-sym-info {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.current-sym-name {
+  font-size: 18px;
+  font-weight: 800;
+  font-family: var(--font-mono);
+}
+
+.current-sym-price {
+  font-size: 18px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--long-green);
+}
+
+.chart-canvas-wrapper {
+  flex: 1;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: radial-gradient(circle at 50% 50%, hsl(222, 45%, 8%) 0%, var(--bg-app) 100%);
+}
+
+#proChartCanvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* Microstructure & Absorption Alerts */
+.bottom-pane {
+  grid-area: bottom;
+  background-color: var(--bg-surface);
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.absorption-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.alert-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  font-size: 11px;
+}
+
+.alert-card.trap {
+  border-left: 3px solid var(--warn-amber);
+}
+
+.alert-card.absorption {
+  border-left: 3px solid var(--accent-cyan);
+}
+
+/* ==========================================================================
+   RIGHT COLUMN: 1-CLICK EXECUTION TERMINAL & POSITIONS
+   ========================================================================== */
+.right-pane {
+  grid-area: right;
+  background-color: var(--bg-surface);
+  display: flex;
+  flex-direction: column;
+}
+
+.terminal-form {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.form-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.order-type-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.btn-side {
+  padding: 10px;
+  font-size: 14px;
+  font-weight: 800;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: center;
+}
+
+.btn-side.long {
+  background: var(--long-green-bg);
+  color: var(--long-green);
+  border-color: var(--long-green);
+}
+
+.btn-side.long.active {
+  background: var(--long-green);
+  color: var(--text-inverse);
+  box-shadow: 0 0 12px var(--long-green-glow);
+}
+
+.btn-side.short {
+  background: var(--short-red-bg);
+  color: var(--short-red);
+  border-color: var(--short-red);
+}
+
+.btn-side.short.active {
+  background: var(--short-red);
+  color: white;
+  box-shadow: 0 0 12px var(--short-red-glow);
+}
+
+.input-container {
+  display: flex;
+  align-items: center;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+}
+
+.input-container input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 700;
+  outline: none;
+}
+
+.input-suffix {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.quick-amount-pills {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+
+.quick-amount-pills button {
+  padding: 4px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.quick-amount-pills button:hover {
+  background: var(--bg-surface-subtle);
+  color: var(--text-primary);
+}
+
+.tpsl-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.btn-execute {
+  width: 100%;
+  padding: 14px;
+  font-size: 15px;
+  font-weight: 800;
+  border-radius: var(--radius-sm);
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.btn-execute.long {
+  background: var(--long-green);
+  color: var(--text-inverse);
+  box-shadow: 0 4px 14px var(--long-green-glow);
+}
+
+.btn-execute.short {
+  background: var(--short-red);
+  color: white;
+  box-shadow: 0 4px 14px var(--short-red-glow);
+}
+
+.btn-execute:hover {
+  filter: brightness(1.15);
+  transform: translateY(-1px);
+}
+
+.btn-execute:active {
+  transform: translateY(1px);
+}
+
+/* Positions Panel */
+.positions-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border-subtle);
+  overflow: hidden;
+}
+
+.position-card {
+  padding: 8px 10px;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.pos-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.pos-sym {
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+.pos-pnl {
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
+
+.pos-details {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.btn-close-pos {
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--bg-surface-subtle);
+  border: 1px solid var(--border-strong);
+  color: var(--text-primary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  align-self: flex-end;
+}
+
+.btn-close-pos:hover {
+  background: var(--short-red);
+  color: white;
+  border-color: var(--short-red);
+}
+
+/* ==========================================================================
+   BOTTOM SCROLLING LIQUIDATION TAPE
+   ========================================================================== */
+.liquidation-tape-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.liq-feed-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px;
+}
+
+.liq-row {
+  display: grid;
+  grid-template-columns: 60px 80px 50px 70px 1fr 60px;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 3px;
+  background: var(--bg-surface-elevated);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  border-left: 3px solid transparent;
+}
+
+.liq-row.long-liq {
+  border-left-color: var(--short-red);
+}
+
+.liq-row.short-liq {
+  border-left-color: var(--long-green);
+}
+
+.liq-exch-badge {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 1px 4px;
+  border-radius: 2px;
+  width: fit-content;
+}
+
+.liq-exch-badge.binance { background: hsla(48, 96%, 53%, 0.2); color: var(--binance-yellow); }
+.liq-exch-badge.bybit { background: hsla(35, 95%, 54%, 0.2); color: var(--bybit-gold); }
+.liq-exch-badge.okx { background: hsla(212, 100%, 55%, 0.2); color: var(--okx-blue); }
+
+.liq-usd {
+  font-weight: 700;
+}
+
+.liq-usd.huge {
+  color: var(--warn-amber);
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-surface);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}

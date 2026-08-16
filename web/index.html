@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cascade Pro Trading Suite - Real-Time Liquidation & Scalping Terminal</title>
+  <meta name="description" content="HFT-grade dual exchange liquidation cascade hunter, autonomous backtesting tuner, and 1-click semi-auto execution trading suite.">
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    
+    <!-- 1. HEADER BAR -->
+    <header class="header-bar">
+      <div class="brand-section">
+        <div class="logo-badge">
+          ⚡ <span>CASCADE</span> PRO
+        </div>
+        <span class="tag-version">v6.0 PRO</span>
+        <div class="connection-badges">
+          <div class="conn-pill" id="badgeBackend">
+            <span class="conn-dot" id="dotBackend"></span> Server
+          </div>
+          <div class="conn-pill" id="badgeBinance">
+            <span class="conn-dot" id="dotBinance"></span> Binance WS
+          </div>
+          <div class="conn-pill" id="badgeBybit">
+            <span class="conn-dot" id="dotBybit"></span> Bybit V5
+          </div>
+        </div>
+      </div>
+
+      <div class="account-summary">
+        <div class="summary-item">
+          <span class="summary-label">Account Equity</span>
+          <span class="summary-value" id="accountEquity">-- USDT</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Available Margin</span>
+          <span class="summary-value" id="accountAvailable">-- USDT</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Unrealized PnL</span>
+          <span class="summary-value" id="accountPnl">+0.0000 USDT</span>
+        </div>
+      </div>
+
+      <div class="header-controls">
+        <button id="btnAutoTrade" class="btn-autotrade">
+          🤖 AUTO-TRADE: <b>OFF (MANUAL)</b>
+        </button>
+        <button id="btnEmergencyClose" class="btn-emergency-close">
+          🛑 FLATTEN ALL
+        </button>
+      </div>
+    </header>
+
+    <!-- 2. MAIN MULTI-PANE WORKSPACE -->
+    <main class="main-workspace">
+      
+      <!-- LEFT PANE: 2-STAGE RADAR & SYMBOL MATRIX -->
+      <aside class="left-pane">
+        <!-- 2-Stage Precursor Radar Subpanel -->
+        <section class="radar-subpanel">
+          <div class="panel-header">
+            <span class="panel-title">⏳ 2-Stage Precursor Radar</span>
+            <span style="font-size:10px; color:var(--text-muted);">8s TTL</span>
+          </div>
+          <div class="panel-body" id="armedList">
+            <!-- Dynamic Armed Cards inserted here -->
+            <div style="color:var(--text-muted); font-size:11px; padding:12px; text-align:center;">
+              도화선 장전 대기 중 (Binance $200+ 감시)
+            </div>
+          </div>
+        </section>
+
+        <!-- Autonomous Tuner Symbol Scoreboard Subpanel -->
+        <section class="radar-subpanel">
+          <div class="panel-header">
+            <span class="panel-title">🏆 Auto-Tuner Matrix</span>
+            <span style="font-size:10px; color:var(--accent-cyan);">1-Click Select</span>
+          </div>
+          <div class="panel-body" style="padding:0;">
+            <table class="symbol-table">
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th>Price</th>
+                  <th>Ticks</th>
+                  <th>WR</th>
+                </tr>
+              </thead>
+              <tbody id="symbolTableBody">
+                <!-- Dynamic Symbol Rows inserted here -->
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </aside>
+
+      <!-- CENTER PANE: REAL-TIME PRO CHART -->
+      <section class="center-pane">
+        <div class="chart-header">
+          <div class="chart-sym-info">
+            <span class="current-sym-name" id="currentSymName">VELVETUSDT</span>
+            <span class="current-sym-price" id="currentSymPrice">$1.0850</span>
+            <span style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">PERP (USDT)</span>
+          </div>
+          <div style="display:flex; gap:8px; font-size:11px; color:var(--text-secondary);">
+            <span>🔴 롱 청산 점</span>
+            <span>🟢 숏 청산 점</span>
+            <span>⚡ 장전 배경</span>
+          </div>
+        </div>
+        <div class="chart-canvas-wrapper">
+          <canvas id="proChartCanvas"></canvas>
+        </div>
+      </section>
+
+      <!-- BOTTOM PANE: MICROSTRUCTURE ABSORPTION & 3-EXCHANGE LIQ TAPE -->
+      <section class="bottom-pane">
+        <div class="panel-header">
+          <span class="panel-title">🌊 3-Exchange Real-Time Liquidation Tape</span>
+          <span style="font-size:10px; color:var(--text-muted);">Binance • Bybit • OKX (0ms Feed)</span>
+        </div>
+        <div class="liquidation-tape-container">
+          <div class="liq-feed-list" id="liqFeedList">
+            <!-- Dynamic Liquidation Tape Rows inserted here -->
+          </div>
+        </div>
+      </section>
+
+      <!-- RIGHT PANE: 1-CLICK EXECUTION TERMINAL & OPEN POSITIONS -->
+      <aside class="right-pane">
+        <div class="panel-header">
+          <span class="panel-title">⚡ 1-Click Execution Terminal</span>
+          <span style="font-size:10px; color:var(--long-green);">Market IOC</span>
+        </div>
+
+        <div class="terminal-form">
+          <!-- Side Selection Tabs -->
+          <div class="order-type-tabs">
+            <button id="btnSideShort" class="btn-side short active">⚡ 숏 (SHORT)</button>
+            <button id="btnSideLong" class="btn-side long">🚀 롱 (LONG)</button>
+          </div>
+
+          <!-- Order Size (USDT) -->
+          <div class="form-group">
+            <label class="form-label" for="inputOrderUsd">주문 증거금 (Margin USDT)</label>
+            <div class="input-container">
+              <input type="number" id="inputOrderUsd" value="1.5" step="0.5" min="0.5" max="100.0">
+              <span class="input-suffix">USDT</span>
+            </div>
+            <div class="quick-amount-pills">
+              <button class="btn-quick-amount" data-val="1.0">$1.0</button>
+              <button class="btn-quick-amount" data-val="1.5">$1.5</button>
+              <button class="btn-quick-amount" data-val="2.0">$2.0</button>
+              <button class="btn-quick-amount" data-val="5.0">$5.0</button>
+            </div>
+          </div>
+
+          <!-- Leverage -->
+          <div class="form-group">
+            <label class="form-label" for="inputLeverage">레버리지 (Leverage)</label>
+            <div class="input-container">
+              <input type="number" id="inputLeverage" value="15" step="1" min="1" max="50">
+              <span class="input-suffix">x</span>
+            </div>
+          </div>
+
+          <!-- TP / SL Percent -->
+          <div class="tpsl-row">
+            <div class="form-group">
+              <label class="form-label" for="inputTpPct">익절 (TP %)</label>
+              <div class="input-container">
+                <input type="number" id="inputTpPct" value="2.0" step="0.5" min="0.5">
+                <span class="input-suffix">%</span>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="inputSlPct">손절 (SL %)</label>
+              <div class="input-container">
+                <input type="number" id="inputSlPct" value="0.6" step="0.1" min="0.2">
+                <span class="input-suffix">%</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 1-Click Execute Button -->
+          <button id="btnExecuteOrder" class="btn-execute short">
+            ⚡ MARKET SELL / SHORT VELVETUSDT
+          </button>
+        </div>
+
+        <!-- Open Positions Section -->
+        <section class="positions-section">
+          <div class="panel-header">
+            <span class="panel-title">📊 Open Positions</span>
+          </div>
+          <div class="panel-body" id="positionsList">
+            <!-- Dynamic Positions inserted here -->
+            <div style="color:var(--text-muted); font-size:11px; padding:8px; text-align:center;">
+              보유 중인 포지션 없음 (100% 현금 안전 보존)
+            </div>
+          </div>
+        </section>
+
+        <!-- Microstructure Absorption Warnings -->
+        <section style="flex:1; display:flex; flex-direction:column; border-top:1px solid var(--border-subtle); overflow:hidden;">
+          <div class="panel-header">
+            <span class="panel-title">🐋 Microstructure & Absorption Radar</span>
+          </div>
+          <div class="panel-body absorption-feed" id="alertFeed">
+            <!-- Dynamic Absorption Alerts -->
+          </div>
+        </section>
+      </aside>
+
+    </main>
+  </div>
+
+  <!-- Master Application Script -->
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>
