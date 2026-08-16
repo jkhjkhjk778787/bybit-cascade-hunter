@@ -26,6 +26,7 @@ export class TunerMatrixComponent {
     symbolsList.forEach(s => {
       const sym = s.symbol;
       const row = document.createElement('tr');
+      row.dataset.symbol = sym;
       if (sym === this.app.currentSymbol) {
         row.classList.add('selected');
       }

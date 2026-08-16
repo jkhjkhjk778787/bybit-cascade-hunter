@@ -315,6 +315,14 @@ html, body {
   gap: 4px;
   position: relative;
   overflow: hidden;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.armed-card:hover {
+  background: var(--bg-surface-subtle);
+  transform: translateX(2px);
+  border-color: var(--border-strong);
 }
 
 .armed-card.short-target {
@@ -490,6 +498,13 @@ html, body {
   background: var(--bg-surface-elevated);
   border: 1px solid var(--border-subtle);
   font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.alert-card:hover {
+  background: var(--bg-surface-subtle);
+  transform: translateX(2px);
 }
 
 .alert-card.trap {
@@ -749,6 +764,13 @@ html, body {
   font-family: var(--font-mono);
   font-size: 11px;
   border-left: 3px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.liq-row:hover {
+  background: var(--bg-surface-subtle);
+  transform: translateX(2px);
 }
 
 .liq-row.long-liq {

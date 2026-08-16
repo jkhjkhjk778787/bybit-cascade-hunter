@@ -45,6 +45,8 @@ export class RadarComponent {
     if (!card) {
       card = document.createElement('div');
       card.className = `armed-card ${isShort ? 'short-target' : 'long-target'}`;
+      card.style.cursor = 'pointer';
+      card.title = `${symbol} 차트 및 주문 터미널로 즉시 전환`;
       card.innerHTML = `
         <div class="armed-top">
           <span class="armed-sym">${symbol}</span>
@@ -58,6 +60,9 @@ export class RadarComponent {
           <div class="progress-bar-fill"></div>
         </div>
       `;
+      card.addEventListener('click', () => {
+        if (window.app) window.app.selectSymbol(symbol);
+      });
       this.armedListEl.prepend(card);
       this.armedCards.set(symbol, card);
     }
@@ -79,6 +84,8 @@ export class RadarComponent {
     const timeStr = new Date(event.timestamp).toLocaleTimeString();
 
     row.className = `liq-row ${rowClass}`;
+    row.style.cursor = 'pointer';
+    row.title = `${event.symbol} 차트 및 주문 터미널로 즉시 전환`;
     row.innerHTML = `
       <span class="liq-exch-badge ${exch}">${exch}</span>
       <span style="font-weight:700;">${event.symbol}</span>
@@ -87,6 +94,10 @@ export class RadarComponent {
       <span style="color:var(--text-muted);">${event.price?.toFixed(event.price > 10 ? 2 : 4) || '-'}</span>
       <span style="color:var(--text-muted); font-size:10px;">${timeStr}</span>
     `;
+
+    row.addEventListener('click', () => {
+      if (window.app) window.app.selectSymbol(event.symbol);
+    });
 
     this.liqFeedListEl.prepend(row);
 

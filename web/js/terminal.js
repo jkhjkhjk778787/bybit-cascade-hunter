@@ -138,6 +138,8 @@ export class TerminalComponent {
 
       const card = document.createElement('div');
       card.className = 'position-card';
+      card.style.cursor = 'pointer';
+      card.title = `${p.symbol} 차트 및 주문 터미널로 즉시 전환`;
       card.innerHTML = `
         <div class="pos-header">
           <span class="pos-sym" style="color:${isLong ? 'var(--long-green)' : 'var(--short-red)'};">
@@ -156,7 +158,14 @@ export class TerminalComponent {
         <button class="btn-close-pos" data-sym="${p.symbol}">시장가 종료</button>
       `;
 
-      card.querySelector('.btn-close-pos').addEventListener('click', async () => {
+      card.addEventListener('click', (e) => {
+        if (e.target.tagName !== 'BUTTON' && window.app) {
+          window.app.selectSymbol(p.symbol);
+        }
+      });
+
+      card.querySelector('.btn-close-pos').addEventListener('click', async (e) => {
+        e.stopPropagation();
         await fetch('/api/order/close_all', { method: 'POST' });
       });
 

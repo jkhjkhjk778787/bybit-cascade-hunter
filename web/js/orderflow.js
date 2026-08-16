@@ -31,6 +31,8 @@ export class OrderflowComponent {
     if (!this.alertFeedEl) return;
     const card = document.createElement('div');
     card.className = `alert-card ${alert.type}`;
+    card.style.cursor = 'pointer';
+    card.title = `${alert.symbol} 차트 및 주문 터미널로 즉시 전환`;
     card.innerHTML = `
       <div>
         <span style="font-weight:700; color:var(--text-primary);">${alert.symbol}</span>
@@ -38,6 +40,9 @@ export class OrderflowComponent {
       </div>
       <span style="font-size:10px; color:var(--text-muted);">${alert.detail}</span>
     `;
+    card.addEventListener('click', () => {
+      if (window.app) window.app.selectSymbol(alert.symbol);
+    });
     this.alertFeedEl.prepend(card);
 
     while (this.alertFeedEl.children.length > 20) {

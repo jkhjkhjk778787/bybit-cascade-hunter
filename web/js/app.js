@@ -12,6 +12,8 @@ class CascadeTradingApp {
   constructor() {
     this.currentSymbol = 'VELVETUSDT';
     this.activeSymbolsData = null;
+    this.latestPrices = {};
+    this.armedSymbols = {};
     this.ws = null;
     this.reconnectTimer = null;
 
@@ -41,6 +43,8 @@ class CascadeTradingApp {
       const res = await fetch('/api/status');
       const data = await res.json();
       this.activeSymbolsData = data.active_symbols;
+      if (data.latest_prices) this.latestPrices = data.latest_prices;
+      if (data.armed_symbols) this.armedSymbols = data.armed_symbols;
 
       // Update Auto-Trade Button State
       const btnAuto = document.getElementById('btnAutoTrade');
@@ -74,9 +78,39 @@ class CascadeTradingApp {
   }
 
   selectSymbol(sym) {
+    if (!sym) return;
     this.currentSymbol = sym;
+
+    // 1. Header Name & Price
     document.getElementById('currentSymName').textContent = sym;
+    const priceEl = document.getElementById('currentSymPrice');
+    const knownPrice = this.latestPrices[sym];
+    if (knownPrice) {
+      priceEl.textContent = `$${knownPrice.toFixed(knownPrice > 10 ? 2 : knownPrice > 0.1 ? 4 : 6)}`;
+    } else {
+      priceEl.textContent = '조회 중...';
+    }
+
+    // 2. Highlight Row in Matrix Table
+    document.querySelectorAll('#symbolTableBody tr').forEach(r => {
+      if (r.dataset.symbol === sym || r.textContent.includes(sym)) {
+        r.classList.add('selected');
+        r.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      } else {
+        r.classList.remove('selected');
+      }
+    });
+
+    // 3. Switch Chart & Armed Status
     this.chart.setSymbol(sym);
+    const armed = this.armedSymbols[sym];
+    if (armed && (Date.now() / 1000 <= armed.expires)) {
+      this.chart.setArmedZone(armed);
+    } else {
+      this.chart.setArmedZone(null);
+    }
+
+    // 4. Switch Terminal
     this.terminal.setSymbol(sym);
   }
 
@@ -115,6 +149,8 @@ class CascadeTradingApp {
       case 'SNAPSHOT':
         this.updateAccountSummary(msg.balance, msg.positions);
         this.terminal.updatePositions(msg.positions);
+        if (msg.prices) this.latestPrices = { ...this.latestPrices, ...msg.prices };
+        if (msg.armed) this.armedSymbols = { ...this.armedSymbols, ...msg.armed };
         if (msg.recent_liqs) {
           msg.recent_liqs.forEach(l => this.radar.addLiquidation(l));
         }
@@ -125,6 +161,7 @@ class CascadeTradingApp {
         this.chart.onLiquidation(msg.event);
         this.orderflow.processLiquidation(msg.event);
         if (msg.armed) {
+          this.armedSymbols[msg.event.symbol] = msg.armed;
           this.radar.updateArmed(msg.event.symbol, msg.armed);
           if (msg.event.symbol === this.currentSymbol) {
             this.chart.setArmedZone(msg.armed);
@@ -133,6 +170,7 @@ class CascadeTradingApp {
         break;
 
       case 'TICKER':
+        this.latestPrices[msg.symbol] = msg.price;
         this.chart.onTick(msg);
         if (msg.symbol === this.currentSymbol) {
           const priceEl = document.getElementById('currentSymPrice');
