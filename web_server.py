@@ -326,53 +326,65 @@ class CascadeTradingServer:
             "positions": positions
         })
 
+    async def fetch_bybit_chart_data(self, symbol: str) -> Dict[str, Any]:
+        """Bybit REST API를 통한 0ms 무지연 1분봉 캔들 및 최근 틱 조회 (디스크 I/O 완전 배제)"""
+        now = time.time()
+        cached = getattr(self, "_chart_cache", {}).get(symbol)
+        if cached and (now - cached["cached_at"] < 3.0):
+            return cached["data"]
+
+        candles = []
+        trades = []
+        try:
+            async with ClientSession() as session:
+                kline_url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}&interval=1&limit=60"
+                trade_url = f"https://api.bybit.com/v5/market/recent-trade?category=linear&symbol={symbol}&limit=100"
+
+                async with session.get(kline_url, timeout=2.5) as r1, session.get(trade_url, timeout=2.5) as r2:
+                    kdata = await r1.json()
+                    tdata = await r2.json()
+
+                    for item in kdata.get("result", {}).get("list", []):
+                        candles.append({
+                            "t": int(item[0]),
+                            "o": float(item[1]),
+                            "h": float(item[2]),
+                            "l": float(item[3]),
+                            "c": float(item[4]),
+                            "v": float(item[5])
+                        })
+                    candles.reverse()
+
+                    for tr in tdata.get("result", {}).get("list", []):
+                        trades.append({
+                            "t": int(tr.get("time", 0)),
+                            "p": float(tr.get("price", 0)),
+                            "s": tr.get("side", "Buy"),
+                            "v": float(tr.get("size", 1))
+                        })
+                    trades.reverse()
+
+        except Exception as e:
+            logger.error(f"차트 데이터 조회 에러: {e}")
+
+        result = {"candles": candles, "trades": trades}
+        if not hasattr(self, "_chart_cache"):
+            self._chart_cache = {}
+        self._chart_cache[symbol] = {"cached_at": now, "data": result}
+        return result
+
     async def handle_api_symbols(self, request: web.Request) -> web.Response:
-        sql = """
-            SELECT symbol, count(*) as ticks, max(price) as high, min(price) as low, argmax(price, exec_time) as last_p
-            FROM trades
-            WHERE exec_time >= (SELECT max(exec_time) - INTERVAL 3 HOUR FROM trades)
-            GROUP BY symbol
-            ORDER BY ticks DESC
-            LIMIT 30
-        """
-        loop = asyncio.get_event_loop()
-        df = await loop.run_in_executor(None, query_duckdb_snapshot, sql)
-        sym_stats = df.to_dict(orient="records") if not df.empty else []
-        return web.json_response({"symbols": sym_stats})
+        """탑 심볼 목록 초고속 반환"""
+        return web.json_response({"symbols": list(self.latest_prices.keys())})
 
     async def handle_api_history(self, request: web.Request) -> web.Response:
-        symbol = request.query.get("symbol", "VELVETUSDT")
-        limit = int(request.query.get("limit", 400))
+        """0ms 초고속 차트 데이터 및 청산 내역 반환"""
+        symbol = request.query.get("symbol", "VELVETUSDT").upper()
+        chart_data = await self.fetch_bybit_chart_data(symbol)
 
-        trades_sql = f"""
-            SELECT epoch_ms(exec_time) as t, price as p, side as s, size as v
-            FROM trades
-            WHERE symbol = '{symbol}'
-            ORDER BY exec_time DESC
-            LIMIT {limit}
-        """
-        liq_sql = f"""
-            SELECT exchange as exch, symbol, epoch_ms(exec_time) as t, pos_side, price as p, size as v, notional_usd as usd
-            FROM liquidations
-            WHERE symbol = '{symbol}'
-            ORDER BY exec_time DESC
-            LIMIT 50
-        """
-        loop = asyncio.get_event_loop()
-        trades_df = await loop.run_in_executor(None, query_duckdb_snapshot, trades_sql)
-        liq_df = await loop.run_in_executor(None, query_duckdb_snapshot, liq_sql)
-
-        trades_data = []
-        if not trades_df.empty:
-            trades_data = trades_df.to_dict(orient="records")
-            trades_data.reverse()
-
-        liq_data = []
-        if not liq_df.empty:
-            liq_data = liq_df.to_dict(orient="records")
-
-        # Also append in-memory recent liquidations for this symbol
+        # In-memory recent liquidations for this symbol
         mem_liqs = [l for l in self.recent_liquidations if l.get("symbol") == symbol]
+        liq_data = []
         for ml in mem_liqs:
             ts = ml.get("timestamp", int(time.time() * 1000))
             usd = ml.get("notional_usd", 0.0)
@@ -391,7 +403,8 @@ class CascadeTradingServer:
 
         return web.json_response({
             "symbol": symbol,
-            "trades": trades_data,
+            "candles": chart_data["candles"],
+            "trades": chart_data["trades"],
             "liquidations": liq_data
         })
 

@@ -68,13 +68,17 @@ export class ProChart {
 
   async fetchHistory() {
     try {
-      const res = await fetch(`/api/history?symbol=${this.symbol}&limit=500`);
+      const res = await fetch(`/api/history?symbol=${this.symbol}`);
       const data = await res.json();
+
+      if (data.candles && data.candles.length > 0) {
+        this.candles1m = data.candles;
+      }
+
       if (data.trades && data.trades.length > 0) {
         this.rawTrades = data.trades;
-        this.latestPrice = this.rawTrades[this.rawTrades.length - 1].p;
-        this.build1mCandles();
-        this.build1sTicks();
+        this.ticks1s = data.trades.map(tr => ({ t: tr.t, p: tr.p }));
+        this.latestPrice = data.trades[data.trades.length - 1].p;
       }
 
       if (data.liquidations && Array.isArray(data.liquidations)) {
