@@ -540,21 +540,24 @@ async def main():
     parser.add_argument("--db", type=str, default=config.DB_PATH, help="DuckDB 경로")
     args = parser.parse_args()
 
+    try:
+        os.nice(5)
+    except Exception:
+        pass
+
     db_mgr = TradeDBManager(args.db)
     
-    # 1. DB 기존 심볼 + 거래대금 상위 50개 심볼 병합 자동 로드
-    existing_syms = set(db_mgr.get_existing_symbols())
-    top_syms = fetch_top_active_symbols(limit=getattr(config, "TOP_SYMBOLS_LIMIT", 50))
-    for s in top_syms:
-        existing_syms.add(s.upper())
+    # 1. 거래대금 상위 핫 심볼(30개) 집중 구독 (과거 모든 비활성 심볼 전수 구독 배제로 CPU 50% 절감)
+    top_syms = fetch_top_active_symbols(limit=getattr(config, "TOP_SYMBOLS_LIMIT", 30))
+    active_syms = set([s.upper() for s in top_syms])
 
     if args.symbol:
-        existing_syms.add(args.symbol.upper())
+        active_syms.add(args.symbol.upper())
     if config.DEFAULT_SYMBOL:
-        existing_syms.add(config.DEFAULT_SYMBOL.upper())
+        active_syms.add(config.DEFAULT_SYMBOL.upper())
 
-    all_symbols = sorted(list(existing_syms))
-    log(f"[*] 기존 DB 및 거래대금 상위 {len(all_symbols)}개 심볼 자동 로드 완료: {', '.join(all_symbols)}")
+    all_symbols = sorted(list(active_syms))
+    log(f"[*] 거래대금 상위 {len(all_symbols)}개 핫 심볼 집중 수집 가동: {', '.join(all_symbols)}")
 
     collector = IntegratedMarketCollector(initial_symbols=all_symbols, db_manager=db_mgr)
 

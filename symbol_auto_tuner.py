@@ -42,7 +42,7 @@ logger = logging.getLogger("AutoTuner")
 DB_PATH = "/home/jph/bybit_trade_collector/bybit_trades.duckdb"
 OUTPUT_CONFIG_PATH = "/home/jph/bybit_trade_collector/active_symbols.json"
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
-TUNING_INTERVAL_SEC = 60.0
+TUNING_INTERVAL_SEC = 120.0
 
 
 def send_discord_report(title: str, description: str, color: int = 3447003):
@@ -370,7 +370,11 @@ def update_active_symbols_file(new_symbols: Dict[str, Any]):
 
 
 def main():
-    logger.info("🚀 [Auto-Tuner Daemon v6.0] 2단계 전조 확정 완전 자율 진화 튜너 시작!")
+    try:
+        os.nice(10)
+    except Exception:
+        pass
+    logger.info("🚀 [Auto-Tuner Daemon v6.0] 2단계 전조 확정 완전 자율 진화 튜너 시작! (Background Nice Mode)")
     while True:
         try:
             elite_syms = run_continuous_two_stage_tuning()
