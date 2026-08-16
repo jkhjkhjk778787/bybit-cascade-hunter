@@ -34,6 +34,12 @@ export class ProChart {
     this._longLiqSumEl = document.getElementById('centerLongLiqSum');
     this._shortLiqSumEl = document.getElementById('centerShortLiqSum');
     this._tooltipEl = document.getElementById('centerLiqTooltip');
+    this._peakPillEl = document.getElementById('liqPeakPill');
+    this._biasPillEl = document.getElementById('liqBiasPill');
+    this._insightTextEl = document.getElementById('liqInsightText');
+
+    this.peakCluster = null;
+    this.quantInsight = null;
 
     // Cumulative Volume Delta (CVD)
     this.binanceCvd = 0.0;
@@ -146,7 +152,7 @@ export class ProChart {
 
   _initResize() {
     const go = () => {
-      const dpr = devicePixelRatio || 1;
+      const dpr = window.devicePixelRatio || 1;
       for (const [canvas, ctx, wKey, hKey] of [
         [this.liqCanvas, this.liqCtx, '_lw', '_lh'],
         [this.tickCanvas, this.tickCtx, '_tw', '_th'],
@@ -198,53 +204,53 @@ export class ProChart {
 
   async _fetchLiquidationDistribution() {
     try {
-      // 1. If Auto-Timeframe, probe symbol's timespan to auto-detect optimal bucket interval
-      if (this.isAutoTimeframe) {
-        const probeRes = await fetch(`/api/liquidations/analytics?timeframe=5m&symbol=${this.symbol}`);
-        const probeData = await probeRes.json();
-        const records = probeData.recent_records || [];
-
-        let autoTf = '5m';
-        if (records.length >= 2) {
-          const timestamps = records.map(r => r.timestamp || 0).filter(t => t > 0);
-          const minT = Math.min(...timestamps);
-          const maxT = Math.max(...timestamps);
-          const spanMs = maxT - minT;
-
-          if (spanMs <= 35 * 60 * 1000) {
-            autoTf = '1m'; // Densely concentrated in last 30m
-          } else if (spanMs <= 4 * 3600 * 1000) {
-            autoTf = '5m'; // Concentrated in 4 hours
-          } else if (spanMs <= 16 * 3600 * 1000) {
-            autoTf = '15m'; // Spanning half a day
-          } else {
-            autoTf = '1h'; // Spanning 24h+
-          }
-        } else if (records.length === 0) {
-          autoTf = '5m';
-        }
-
-        this.effectiveTimeframe = autoTf;
-        if (this._autoTfBadgeEl) {
-          this._autoTfBadgeEl.textContent = `AUTO: ${autoTf.toUpperCase()}`;
-          this._autoTfBadgeEl.style.borderColor = 'var(--brand-cyan)';
-          this._autoTfBadgeEl.style.color = 'var(--brand-cyan)';
-        }
-      }
-
-      // 2. Fetch analytics with effective timeframe
-      const url = `/api/liquidations/analytics?timeframe=${this.effectiveTimeframe}&symbol=${this.symbol}`;
+      const tfParam = this.isAutoTimeframe ? 'auto' : this.selectedTimeframe;
+      const url = `/api/liquidations/analytics?timeframe=${tfParam}&symbol=${this.symbol}`;
       const res = await fetch(url);
       const data = await res.json();
 
       this.liqTimeSeries = data.time_series || [];
       this.liqSummary = data.summary || { total_usd: 0, long_usd: 0, short_usd: 0, count: 0 };
+      this.peakCluster = data.peak_cluster || null;
+      this.quantInsight = data.quant_insight || null;
+
+      if (this.isAutoTimeframe) {
+        this.effectiveTimeframe = data.timeframe || '5m';
+        if (this._autoTfBadgeEl) {
+          this._autoTfBadgeEl.textContent = `AUTO: ${this.effectiveTimeframe.toUpperCase()}`;
+          this._autoTfBadgeEl.style.borderColor = 'var(--brand-cyan)';
+          this._autoTfBadgeEl.style.color = 'var(--brand-cyan)';
+          if (data.quant_insight?.optimal_reason) {
+            this._autoTfBadgeEl.title = data.quant_insight.optimal_reason;
+          }
+        }
+      }
 
       if (this._longLiqSumEl) {
         this._longLiqSumEl.textContent = `🔴 롱 $${this._fmtUsd(this.liqSummary.long_usd || 0)}`;
       }
       if (this._shortLiqSumEl) {
         this._shortLiqSumEl.textContent = `🟢 숏 $${this._fmtUsd(this.liqSummary.short_usd || 0)}`;
+      }
+
+      // Update Quant Insight Banner
+      if (this._peakPillEl) {
+        if (this.peakCluster && this.peakCluster.peak_usd > 0) {
+          this._peakPillEl.innerHTML = `🔥 피크: <b>${this.peakCluster.time_str}</b> ($${this._fmtUsd(this.peakCluster.peak_usd)}, ${this.peakCluster.peak_pct}%)`;
+          this._peakPillEl.style.display = 'inline-flex';
+        } else {
+          this._peakPillEl.innerHTML = `🔥 피크: 집계 대기 중`;
+        }
+      }
+
+      if (this._biasPillEl) {
+        this._biasPillEl.textContent = this.quantInsight?.bias || '⚖️ 롱/숏 균형';
+      }
+
+      if (this._insightTextEl) {
+        const headline = this.quantInsight?.headline || `${this.symbol} 청산 데이터 감시 중`;
+        const action = this.quantInsight?.action_strategy || '';
+        this._insightTextEl.innerHTML = `<b>${headline}</b> <span style="color:var(--text-muted); margin:0 4px;">|</span> <span style="color:var(--brand-cyan);">💡 ${action}</span>`;
       }
 
       this._requestRender(true, false, false);
@@ -443,7 +449,7 @@ export class ProChart {
       if (tot > maxUsd) maxUsd = tot;
     }
     if (maxUsd === 0) maxUsd = 500;
-    maxUsd *= 1.15; // 15% headroom
+    maxUsd *= 1.18; // 18% headroom for Peak Label
 
     // Draw Grid & Y-Axis Scale
     ctx.strokeStyle = 'hsl(222, 25%, 15%)';
@@ -492,6 +498,22 @@ export class ProChart {
         ctx.fillRect(x, baseY - totalH, barW, shortH);
       }
 
+      // Peak Highlight Glow and Label
+      const isPeak = this.peakCluster && (item.time_str === this.peakCluster.time_str) && total > 0;
+      if (isPeak) {
+        ctx.fillStyle = 'rgba(246, 173, 85, 0.15)';
+        ctx.fillRect(x - 2, baseY - totalH - 12, barW + 4, totalH + 12);
+
+        ctx.fillStyle = '#f6ad55';
+        ctx.font = 'bold 9px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('🔥PEAK', x + barW / 2, Math.max(12, baseY - totalH - 3));
+
+        ctx.strokeStyle = '#f6ad55';
+        ctx.lineWidth = 1.8;
+        ctx.strokeRect(x - 1, baseY - totalH - 1, barW + 2, totalH + 2);
+      }
+
       // Hover highlight border
       if (i === this.liqHoverIndex) {
         ctx.strokeStyle = '#00f2fe';
@@ -511,7 +533,7 @@ export class ProChart {
       // Time X-Axis Label
       const labelInterval = Math.max(1, Math.floor(n / 6));
       if (i % labelInterval === 0 || i === n - 1) {
-        ctx.fillStyle = '#8b949e';
+        ctx.fillStyle = isPeak ? '#f6ad55' : '#8b949e';
         ctx.textAlign = 'center';
         ctx.fillText(item.time_str || '', x + barW / 2, h - 6);
       }

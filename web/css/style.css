@@ -1480,3 +1480,47 @@ html, body {
   background: var(--bg-surface-subtle);
   color: var(--text-bright);
 }
+
+/* Center Chart Liquidation Quant Insight Banner */
+.liq-quant-insight-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  background: hsla(220, 20%, 8%, 0.9);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 11px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.insight-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  padding: 2px 8px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.insight-pill.peak-pill {
+  background: hsla(38, 92%, 50%, 0.15);
+  color: var(--warn-amber);
+  border: 1px solid hsla(38, 92%, 50%, 0.4);
+}
+
+.insight-pill.bias-pill {
+  background: hsla(215, 20%, 20%, 0.6);
+  color: var(--text-bright);
+  border: 1px solid var(--border-subtle);
+}
+
+.insight-text {
+  color: var(--text-secondary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
