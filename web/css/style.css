@@ -361,14 +361,39 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 4px;
+}
+
+.feed-sym {
+  font-weight: 800;
+  color: var(--text-primary);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 80px;
 }
 
 .feed-row-bottom {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 4px;
   font-size: 10px;
+}
+
+.feed-side {
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.feed-time {
   color: var(--text-muted);
+  font-size: 9px;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  letter-spacing: -0.2px;
 }
 
 /* Cascade Burst Card (Cross-Exchange Linkage) */

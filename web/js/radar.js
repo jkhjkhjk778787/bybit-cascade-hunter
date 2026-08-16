@@ -143,9 +143,8 @@ export class RadarComponent {
     const rowClass = isLong ? 'long-liq' : 'short-liq';
     const usd = event.notional_usd || (event.price * event.amount);
     const isHuge = usd >= 5000;
-    const isCascade = event.is_cascade;
-
-    const timeStr = new Date(event.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const timeDate = event.timestamp ? new Date(event.timestamp) : new Date();
+    const timeStr = timeDate.toTimeString().split(' ')[0]; // 'HH:MM:SS' 24시간 형식
 
     row.className = `liq-row ${rowClass} ${isCascade ? 'cascade-linked' : ''}`;
     row.style.cursor = 'pointer';
@@ -153,14 +152,14 @@ export class RadarComponent {
     row.dataset.symbol = event.symbol;
     row.innerHTML = `
       <div class="feed-row-top">
-        <span style="font-weight:800; color:var(--text-primary); font-size:12px;">${event.symbol}</span>
+        <span class="feed-sym">${event.symbol}</span>
         <span class="liq-usd ${isHuge ? 'huge' : ''}">$${Math.round(usd).toLocaleString()}</span>
       </div>
       <div class="feed-row-bottom">
-        <span style="color:${isLong ? 'var(--short-red)' : 'var(--long-green)'}; font-weight:700;">
+        <span class="feed-side" style="color:${isLong ? 'var(--short-red)' : 'var(--long-green)'};">
           ${sideText} ${isCascade ? '💥 LINK' : ''}
         </span>
-        <span style="color:var(--text-muted); font-size:10px;">${timeStr}</span>
+        <span class="feed-time">${timeStr}</span>
       </div>
     `;
 

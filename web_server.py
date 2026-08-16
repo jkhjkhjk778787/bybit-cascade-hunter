@@ -18,6 +18,7 @@ import time
 import urllib.parse
 import urllib.request
 from collections import deque, OrderedDict
+from datetime import datetime
 from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP, ROUND_UP
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Set
@@ -1012,8 +1013,9 @@ class CascadeTradingServer:
                         self.recent_liquidations_by_sym[sym].append(event_dict)
                         self.liq_manager.add_live_event(event_dict)
 
-                        # 레이더 및 자동매매 타겟팅: TOP 20 또는 활성 구독 심볼
-                        is_target_symbol = (not self.top20_symbols) or (sym in self.top20_symbols) or (sym in self.subscribed_ticker_symbols)
+                        # 2. 💥 [연쇄 폭포수 전이 레이더 피드] 상위 거래대금 TOP 20종만 엄격 필터링
+                        if self.top20_symbols and (sym not in self.top20_symbols and sym not in self.subscribed_ticker_symbols):
+                            continue
 
                         is_cascade = False
                         cascade_data = None
