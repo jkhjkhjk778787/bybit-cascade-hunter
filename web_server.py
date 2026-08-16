@@ -925,7 +925,7 @@ class CascadeTradingServer:
             await asyncio.sleep(0.1)
 
     async def run_position_guard_loop(self):
-        """실시간 포지션 감시 및 45초 안전 타임아웃 자동 종료 엔진"""
+        """실시간 포지션 감시 및 경과시간 추적 엔진"""
         while self.is_running:
             try:
                 positions = await asyncio.to_thread(self.trader.get_positions)
@@ -947,22 +947,6 @@ class CascadeTradingServer:
                             self.position_entry_times[sym] = up_time / 1000.0
                         else:
                             self.position_entry_times[sym] = now
-
-                    entry_t = self.position_entry_times[sym]
-                    elapsed = now - entry_t
-
-                    # 45초 초과 시 자동 시장가 종료
-                    if elapsed >= 45.0:
-                        logger.warning(f"⏱️ [{sym}] 45초 안전 타임아웃 도달 ({elapsed:.1f}초 경과) ➔ 시장가 자동 종료 실행!")
-                        close_res = await asyncio.to_thread(self.trader.close_position, sym, p.get("side"), size)
-                        self.position_entry_times.pop(sym, None)
-                        await self.broadcast({
-                            "type": "POSITION_TIMEOUT",
-                            "symbol": sym,
-                            "side": p.get("side"),
-                            "elapsed": round(elapsed, 1),
-                            "result": close_res
-                        })
 
                 # 종료된 포지션의 엔트리 타임 정리
                 for sym in list(self.position_entry_times.keys()):

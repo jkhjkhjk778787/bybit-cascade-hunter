@@ -154,9 +154,10 @@ export class TerminalComponent {
       const pnl = p.unrealisedPnl;
       const pnlClass = pnl >= 0 ? 'positive' : 'negative';
 
-      const elapsed = p.elapsedSec != null ? p.elapsedSec : 0;
-      const rem = Math.max(0, Math.round(45 - elapsed));
-      const remColor = rem <= 10 ? 'var(--short-red)' : rem <= 20 ? 'var(--warn-amber)' : 'var(--long-green)';
+      const elapsedSec = p.elapsedSec != null ? Math.max(0, Math.round(p.elapsedSec)) : 0;
+      const mins = Math.floor(elapsedSec / 60);
+      const secs = elapsedSec % 60;
+      const elapsedStr = mins > 0 ? `${mins}분 ${secs}초` : `${secs}초`;
 
       const card = document.createElement('div');
       card.className = 'position-card';
@@ -178,9 +179,9 @@ export class TerminalComponent {
           <span>수량: ${p.size}</span>
           <span>TP/SL: ${p.takeProfit || '-'}/${p.stopLoss || '-'}</span>
         </div>
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px; font-size:10px; font-family:var(--font-mono);">
-          <span style="color:${remColor}; font-weight:800;">⏱️ 안전종료: ${rem}초 / 45초</span>
-          <button class="btn-close-pos" data-sym="${p.symbol}" style="padding:3px 8px; font-size:10px; border-radius:4px;">즉시 종료</button>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px; font-size:11px; font-family:var(--font-mono);">
+          <span style="color:var(--text-dim);">⏱️ 경과: <b style="color:var(--brand-cyan); font-weight:800;">${elapsedStr}</b></span>
+          <button class="btn-close-pos" data-sym="${p.symbol}" style="padding:3px 8px; font-size:10px; border-radius:4px;">시장가 종료</button>
         </div>
       `;
 
