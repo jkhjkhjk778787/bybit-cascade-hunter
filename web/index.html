@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Cascade Pro Trading Suite - Real-Time Liquidation & Scalping Terminal</title>
   <meta name="description" content="HFT-grade dual exchange liquidation cascade hunter, autonomous backtesting tuner, and 1-click semi-auto execution trading suite.">
-  <link rel="stylesheet" href="/css/style.css?v=20260817_0452">
+  <link rel="stylesheet" href="/css/style.css?v=20260817_0458">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
@@ -229,22 +229,34 @@
             </div>
           </div>
 
-          <!-- TP / SL Percent -->
+          <!-- TP / SL Percent with Dynamic Leverage & ROE Indicator -->
           <div class="tpsl-row">
             <div class="form-group">
-              <label class="form-label" for="inputTpPct">익절 (TP %)</label>
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <label class="form-label" for="inputTpPct" style="margin-bottom:0;">익절 (TP %)</label>
+                <span id="tpRoeLabel" style="font-size:10px; font-weight:700; color:var(--long-green); font-family:var(--font-mono);">+50.0% ROE</span>
+              </div>
               <div class="input-container">
-                <input type="number" id="inputTpPct" value="2.0" step="0.5" min="0.5">
+                <input type="number" id="inputTpPct" value="2.0" step="0.1" min="0.1">
                 <span class="input-suffix">%</span>
               </div>
             </div>
             <div class="form-group">
-              <label class="form-label" for="inputSlPct">손절 (SL %)</label>
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <label class="form-label" for="inputSlPct" style="margin-bottom:0;">손절 (SL %)</label>
+                <span id="slRoeLabel" style="font-size:10px; font-weight:700; color:var(--short-red); font-family:var(--font-mono);">-15.0% ROE</span>
+              </div>
               <div class="input-container">
-                <input type="number" id="inputSlPct" value="0.6" step="0.1" min="0.2">
+                <input type="number" id="inputSlPct" value="0.6" step="0.05" min="0.05">
                 <span class="input-suffix">%</span>
               </div>
             </div>
+          </div>
+
+          <!-- Liquidation Safety Margin & Risk/Reward Ratio Bar -->
+          <div id="liqSafetyBadge" style="font-size:10px; padding:4px 8px; border-radius:4px; margin-top:-4px; margin-bottom:10px; background:hsla(158, 100%, 41%, 0.12); color:var(--long-green); border:1px solid hsla(158, 100%, 41%, 0.3); font-family:var(--font-mono); display:flex; justify-content:space-between; align-items:center;">
+            <span>🛡️ 청산 안전 거리: <b id="liqDistanceText">~3.6% (안전)</b></span>
+            <span>손익비: <b id="rrRatioText">1 : 3.3</b></span>
           </div>
 
           <!-- 1-Click Execute Button -->
@@ -429,6 +441,6 @@
   </div>
 
   <!-- Master Application Script -->
-  <script type="module" src="/js/app.js?v=20260817_0452"></script>
+  <script type="module" src="/js/app.js?v=20260817_0458"></script>
 </body>
 </html>

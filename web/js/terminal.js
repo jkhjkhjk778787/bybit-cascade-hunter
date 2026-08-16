@@ -70,6 +70,7 @@ export class TerminalComponent {
 
     document.getElementById('inputLeverage').addEventListener('input', (e) => {
       this.leverage = parseFloat(e.target.value) || 15;
+      this.adjustTpSlByLeverage(this.leverage);
       this.recalculateMargin();
     });
 
@@ -80,16 +81,19 @@ export class TerminalComponent {
         const maxLev = this.symbolMaxLeverages[this.selectedSymbol] || 25;
         this.leverage = maxLev;
         document.getElementById('inputLeverage').value = maxLev;
+        this.adjustTpSlByLeverage(maxLev);
         this.recalculateMargin();
       });
     }
 
     document.getElementById('inputTpPct').addEventListener('input', (e) => {
       this.tpPct = parseFloat(e.target.value) || 2.0;
+      this.updateRoePreview();
     });
 
     document.getElementById('inputSlPct').addEventListener('input', (e) => {
       this.slPct = parseFloat(e.target.value) || 0.6;
+      this.updateRoePreview();
     });
 
     // Order Execution
@@ -115,6 +119,56 @@ export class TerminalComponent {
     }
   }
 
+  adjustTpSlByLeverage(lev) {
+    const l = Math.max(1, parseFloat(lev) || 25);
+    // 🛡️ 레버리지 연동 방탄 TP/SL 공식: 목표 손실 ROE ≈ -18%, 목표 익절 ROE ≈ +54% (1:3 손익비)
+    const autoSl = Math.max(0.2, Math.min(3.5, +(18.0 / l).toFixed(2)));
+    const autoTp = Math.max(0.5, Math.min(9.0, +(54.0 / l).toFixed(2)));
+
+    const inputTp = document.getElementById('inputTpPct');
+    const inputSl = document.getElementById('inputSlPct');
+    if (inputTp && inputSl) {
+      inputTp.value = autoTp;
+      inputSl.value = autoSl;
+      this.tpPct = autoTp;
+      this.slPct = autoSl;
+    }
+    this.updateRoePreview();
+  }
+
+  updateRoePreview() {
+    const l = Math.max(1, this.leverage || 25);
+    const tpRoe = +(this.tpPct * l).toFixed(1);
+    const slRoe = -(this.slPct * l).toFixed(1);
+    const liqDist = +(90.0 / l).toFixed(1);
+    const rrRatio = this.slPct > 0 ? (this.tpPct / this.slPct).toFixed(1) : '0';
+
+    const tpLabel = document.getElementById('tpRoeLabel');
+    const slLabel = document.getElementById('slRoeLabel');
+    const liqDistText = document.getElementById('liqDistanceText');
+    const rrText = document.getElementById('rrRatioText');
+    const badge = document.getElementById('liqSafetyBadge');
+
+    if (tpLabel) tpLabel.textContent = `+${tpRoe}% ROE`;
+    if (slLabel) slLabel.textContent = `${slRoe}% ROE`;
+    if (rrText) rrText.textContent = `1 : ${rrRatio}`;
+
+    if (badge && liqDistText) {
+      if (this.slPct >= liqDist * 0.7) {
+        badge.style.background = 'hsla(348, 100%, 61%, 0.15)';
+        badge.style.borderColor = 'var(--short-red)';
+        badge.style.color = 'var(--short-red)';
+        liqDistText.textContent = `~${liqDist}% (⚠️ 청산 위험!)`;
+      } else {
+        badge.style.background = 'hsla(158, 100%, 41%, 0.12)';
+        badge.style.borderColor = 'hsla(158, 100%, 41%, 0.3)';
+        badge.style.color = 'var(--long-green)';
+        const retained = Math.max(0, Math.round(100 + parseFloat(slRoe)));
+        liqDistText.textContent = `~${liqDist}% (손절 시 잔고 ${retained}% 보존)`;
+      }
+    }
+  }
+
   recalculateMargin() {
     const notional = Math.max(6.0, this.minQty * (this.lastPrice || 1.0));
     const lev = Math.max(1, this.leverage || 25);
@@ -128,6 +182,7 @@ export class TerminalComponent {
       const inp = document.getElementById('inputOrderUsd');
       if (inp) inp.value = reqMargin;
     }
+    this.updateRoePreview();
   }
 
   updatePrice(price, minQty = null) {
@@ -158,7 +213,8 @@ export class TerminalComponent {
     const maxLabel = document.getElementById('maxLevLabel');
     if (maxLabel) maxLabel.textContent = effectiveMaxLev;
 
-    // 가격/레버리지 기반 $6 노셔널 맞춤 증거금 즉시 재계산
+    // 레버리지에 맞춘 방탄 TP / SL 자동 조정 및 ROE 프리뷰
+    this.adjustTpSlByLeverage(effectiveMaxLev);
     this.recalculateMargin();
   }
 

@@ -245,6 +245,18 @@ class BybitTradingService:
             "category": "linear", "symbol": symbol, "buyLeverage": lev_str, "sellLeverage": lev_str
         })
 
+        # 🛡️ 레버리지 연동 청산 방지 하드 가드 (Liquidation Distance Safety Clamp)
+        # Bybit 청산 거리 ≈ 90% / L 이므로, SL은 최대 65% / L을 절대 초과할 수 없음 (청산 100% 방지)
+        max_safe_sl = round(65.0 / max(1.0, effective_leverage), 2)
+        if sl_pct > max_safe_sl:
+            logger.warning(f"⚠️ [{symbol}] 요청된 손절폭({sl_pct}%)이 {effective_leverage}x 청산 위험선 초과 ➔ 안전 손절폭({max_safe_sl}%)으로 자동 보정!")
+            sl_pct = max_safe_sl
+
+        # 손익비(Risk/Reward) 최소 1:2.0 보장
+        min_safe_tp = round(sl_pct * 2.0, 2)
+        if tp_pct < min_safe_tp:
+            tp_pct = min_safe_tp
+
         # 1. 가용 잔고(Available Balance) 자동 보정 (초과 주문 시 가용 잔고 내로 자동 스케일링)
         try:
             wb = self.get_wallet_balance()
