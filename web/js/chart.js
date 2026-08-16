@@ -312,13 +312,14 @@ export class ProChart {
   onTick(tick) {
     if (tick.symbol !== this.symbol) return;
     this.latestPrice = tick.price;
-    const ms = tick.time * 1000;
+    const nowMs = Date.now();
+    const ms = tick.time ? (tick.time < 1e11 ? Math.floor(tick.time * 1000) : Math.floor(tick.time)) : nowMs;
 
     // push tick
     this.ticks1s.push({ t: ms, p: tick.price });
 
-    // prune ticks older than 120s
-    const cutoff = ms - 120000;
+    // prune ticks older than 180s
+    const cutoff = ms - 180000;
     while (this.ticks1s.length > 2 && this.ticks1s[0].t < cutoff) {
       this.ticks1s.shift();
     }

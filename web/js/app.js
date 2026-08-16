@@ -2,10 +2,10 @@
  * Master Application Controller & WebSocket Connection Manager
  */
 
-import { ProChart } from './chart.js?v=20260817_0535';
-import { RadarComponent } from './radar.js?v=20260817_0535';
-import { TerminalComponent } from './terminal.js?v=20260817_0535';
-import { OrderflowComponent } from './orderflow.js?v=20260817_0535';
+import { ProChart } from './chart.js?v=20260817_0537';
+import { RadarComponent } from './radar.js?v=20260817_0537';
+import { TerminalComponent } from './terminal.js?v=20260817_0537';
+import { OrderflowComponent } from './orderflow.js?v=20260817_0537';
 
 class CascadeTradingApp {
   constructor() {
@@ -199,6 +199,18 @@ class CascadeTradingApp {
 
       case 'CVD_BATCH':
         this.chart.onCvdBatch(msg.items, msg.time);
+        if (msg.items && msg.items.length > 0) {
+          msg.items.forEach(item => {
+            if (item.s === this.currentSymbol && item.p > 0) {
+              this.latestPrices[item.s] = item.p;
+              this.chart.onTick({ symbol: item.s, price: item.p, time: msg.time });
+              if (this._priceEl) {
+                this._priceEl.textContent = `$${item.p.toFixed(item.p > 10 ? 2 : item.p > 0.1 ? 4 : 6)}`;
+              }
+              this.terminal.updatePrice(item.p);
+            }
+          });
+        }
         break;
 
       case 'CVD_UPDATE':
