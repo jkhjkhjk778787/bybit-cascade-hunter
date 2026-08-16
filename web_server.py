@@ -687,142 +687,6 @@ class InMemoryLiquidationManager:
             return []
 
 
-class CVDSlopeTracker:
-    """
-    실시간 멀티 심볼 듀얼 거래소 CVD 기울기 및 가속도 피크 감지 엔진 (CPU/메모리 극대화 최적화)
-    - 1초 타임버킷 집계: 마이크로 틱들을 1초 슬롯에 누적하여 불필요한 반복 연산 98% 절감
-    - O(1) 제로-루프 인덱싱: 3s(-4), 15s(-16), 60s(0) 고정 인덱스 참조로 선형 탐색 오버헤드 제거
-    - 4대 핵심 퀀트 중요 이벤트(아이스버그 숏, 지지선 흡수, 진성 돌파, 파열 덤핑)만 서버에서 전량 판정
-    """
-    __slots__ = ('history', 'cum_cvd', 'last_alert_time', 'binance_lead_sparks', 'cooldown_sec')
-
-    def __init__(self):
-        self.history: Dict[tuple, deque] = {}
-        self.cum_cvd: Dict[tuple, float] = {}
-        self.last_alert_time: Dict[tuple, float] = {}
-        self.binance_lead_sparks: Dict[str, tuple] = {}
-        self.cooldown_sec = 3.0  # 동일 심볼 3초 쿨다운
-
-    def push_delta(self, exchange: str, symbol: str, delta_usd: float, price: float, now: float) -> Optional[Dict[str, Any]]:
-        key = (exchange, symbol)
-        if key not in self.cum_cvd:
-            self.cum_cvd[key] = 0.0
-            self.history[key] = deque(maxlen=60)
-
-        self.cum_cvd[key] += delta_usd
-        hist = self.history[key]
-        now_int = int(now)
-
-        # 1초 버킷 압축: 같은 1초 내에 들어오는 마이크로 틱은 마지막 슬롯만 갱신 (메모리 할당 0)
-        if hist and hist[-1][0] == now_int:
-            hist[-1] = (now_int, self.cum_cvd[key], price)
-        else:
-            hist.append((now_int, self.cum_cvd[key], price))
-
-        if len(hist) < 6:
-            return None
-
-        # O(1) 초단기 3초 전 슬롯 참조
-        idx_3s = -4 if len(hist) >= 4 else 0
-        t_3s_sample = hist[idx_3s]
-        dt_3s = max(1, now_int - t_3s_sample[0])
-        slope_3s = (self.cum_cvd[key] - t_3s_sample[1]) / dt_3s  # USD/s
-
-        # O(1) 15초 전 슬롯 참조 (가성비 대조)
-        idx_15s = -16 if len(hist) >= 16 else 0
-        t_15s_sample = hist[idx_15s]
-        start_p = t_15s_sample[2]
-        dp_pct = ((price - start_p) / start_p * 100.0) if start_p > 0 else 0.0
-
-        # [특징 1] 직전 60초 변동성 압축률
-        min_p = min(x[2] for x in hist)
-        max_p = max(x[2] for x in hist)
-        range_pct_60s = ((max_p - min_p) / min_p * 100.0) if min_p > 0 else 0.0
-        is_squeeze = range_pct_60s <= 1.25
-
-        # [특징 2] CVD 가속도 폭발 배율 (Acceleration Multiplier)
-        dt_total = max(1, now_int - hist[0][0])
-        cum_delta_60s = abs(self.cum_cvd[key] - hist[0][1])
-        avg_sec_cvd = cum_delta_60s / dt_total
-        accel_ratio = round(abs(slope_3s) / max(300.0, avg_sec_cvd), 1) if avg_sec_cvd > 0 else 1.0
-
-        # O(N) 간소화 표준편차 (Z-score)
-        n = len(hist)
-        diffs = [hist[i][1] - hist[i-1][1] for i in range(1, n)]
-        mean_s = sum(diffs) / (n - 1)
-        var_s = sum((d - mean_s) ** 2 for d in diffs) / (n - 1)
-        std_s = math.sqrt(var_s) if var_s > 0 else 1000.0
-        z_score = (slope_3s - mean_s) / max(500.0, std_s)
-
-        # 임계값: |Z| >= 2.0 및 최소 초당 $2,000 이상
-        abs_slope = abs(slope_3s)
-        if abs(z_score) >= 2.0 and abs_slope >= 2000.0:
-            if now - self.last_alert_time.get(key, 0.0) < self.cooldown_sec:
-                return None
-            self.last_alert_time[key] = now
-
-            is_buy = slope_3s > 0
-            side = "buy" if is_buy else "sell"
-
-            # [특징 4] 바이낸스 0.9s 선행 도화선 트래킹
-            is_bin_spark = False
-            is_byb_transition = False
-            if exchange == "binance":
-                self.binance_lead_sparks[symbol] = (slope_3s, now, side)
-                is_bin_spark = True
-            elif exchange == "bybit":
-                if symbol in self.binance_lead_sparks:
-                    b_slope, b_time, b_side = self.binance_lead_sparks[symbol]
-                    if now - b_time <= 4.0 and b_side == side:
-                        is_byb_transition = True
-
-            # [특징 3] 🎯 4대 핵심 퀀트 중요 이벤트만 엄격 필터링
-            event_class = None
-            if is_buy:
-                if dp_pct <= 0.018:
-                    event_class = "ICEBERG_SHORT_TRAP"
-                    insight = f"🪤 숏 트랩 (매수흡수·윗벽)" + (" [수렴]" if is_squeeze else "")
-                elif dp_pct >= 0.045:
-                    event_class = "TRUE_BULL_BREAKOUT"
-                    insight = f"🚀 진성 돌파 ({accel_ratio}x 가속)" + (" [수렴탈출]" if is_squeeze else "")
-            else:
-                if dp_pct >= -0.018:
-                    event_class = "SUPPORT_ABSORPTION"
-                    insight = f"⚠️ 지지선 흡수 (붕괴주의)"
-                elif dp_pct <= -0.045:
-                    event_class = "WATERFALL_DUMP"
-                    insight = f"🔴 파열 덤핑 ({accel_ratio}x 가속)" + (" [수렴이탈]" if is_squeeze else "")
-
-            # 4대 중요 이벤트 또는 선행 전이에 해당하지 않는 단순 거래량 노이즈는 전면 차단
-            if not event_class and not is_byb_transition:
-                return None
-
-            if is_byb_transition:
-                insight = "⚡ [선행전이] " + (insight if event_class else "바이낸스 도화선 전이")
-            elif is_bin_spark:
-                insight = " 도화선 " + (insight if event_class else "기울기 급변")
-
-            return {
-                "exchange": exchange,
-                "symbol": symbol,
-                "event_class": event_class or "LEAD_TRANSITION",
-                "slope_usd_sec": round(slope_3s, 1),
-                "z_score": round(z_score, 1),
-                "side": side,
-                "price": price,
-                "dp_pct": round(dp_pct, 2),
-                "accel_ratio": accel_ratio,
-                "is_squeeze": is_squeeze,
-                "is_lead_lag": is_byb_transition or is_bin_spark,
-                "insight": insight,
-                "time": int(now * 1000)
-            }
-
-        return None
-
-        return None
-
-
 @web.middleware
 async def no_cache_middleware(request: web.Request, handler):
     resp = await handler(request)
@@ -838,7 +702,6 @@ class CascadeTradingServer:
         self.app = web.Application(middlewares=[no_cache_middleware])
         self.trader = BybitTradingService(CRED_PATH)
         self.liq_manager = InMemoryLiquidationManager(DB_PATH)
-        self.cvd_slope_tracker = CVDSlopeTracker()
         self.ws_clients: Set[web.WebSocketResponse] = set()
         self.is_running = True
         self.auto_trade_enabled = False
@@ -1432,14 +1295,6 @@ class CascadeTradingServer:
                                     self._cvd_deltas[sym] = {"bin_delta": 0.0, "byb_delta": 0.0, "price": p}
                                 self._cvd_deltas[sym]["bin_delta"] += delta
                                 self._cvd_deltas[sym]["price"] = p
-
-                                # 🌊 Binance CVD 급격한 기울기 피크 감지
-                                peak_ev = self.cvd_slope_tracker.push_delta("binance", sym, delta, p, time.time())
-                                if peak_ev:
-                                    await self.broadcast({
-                                        "type": "CVD_SLOPE_PEAK",
-                                        "peak": peak_ev
-                                    })
             except Exception as e:
                 logger.error(f"Binance Trade Stream 에러: {e} ➔ 3초 후 재연결...")
                 await asyncio.sleep(3)
@@ -1476,14 +1331,6 @@ class CascadeTradingServer:
                                         self._cvd_deltas[sym] = {"bin_delta": 0.0, "byb_delta": 0.0, "price": p}
                                     self._cvd_deltas[sym]["byb_delta"] += delta
                                     self._cvd_deltas[sym]["price"] = p
-
-                                    # 🌊 Bybit CVD 급격한 기울기 피크 감지
-                                    peak_ev = self.cvd_slope_tracker.push_delta("bybit", sym, delta, p, time.time())
-                                    if peak_ev:
-                                        await self.broadcast({
-                                            "type": "CVD_SLOPE_PEAK",
-                                            "peak": peak_ev
-                                        })
             except Exception as e:
                 logger.error(f"Bybit Trade Stream 에러: {e} ➔ 3초 후 재연결...")
                 await asyncio.sleep(3)

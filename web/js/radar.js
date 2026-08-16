@@ -4,27 +4,23 @@
  */
 
 export class RadarComponent {
-  constructor(cascadeListId, binanceFeedId, bybitFeedId, binanceCvdPeakId, bybitCvdPeakId) {
+  constructor(cascadeListId, binanceFeedId, bybitFeedId) {
     this.cascadeListEl = document.getElementById(cascadeListId);
     this.binanceFeedEl = document.getElementById(binanceFeedId);
     this.bybitFeedEl = document.getElementById(bybitFeedId);
-    this.binanceCvdPeakEl = document.getElementById(binanceCvdPeakId || 'binanceCvdPeakList');
-    this.bybitCvdPeakEl = document.getElementById(bybitCvdPeakId || 'bybitCvdPeakList');
 
     this.cascadeCards = new Map(); // symbol -> DOMElement
     this._timerRunning = false;
 
-    // Event delegation for liquidation feeds & CVD slope feeds
+    // Event delegation for liquidation feeds
     const handleFeedClick = e => {
-      const row = e.target.closest('.liq-row, .cvd-peak-row');
+      const row = e.target.closest('.liq-row');
       if (row && row.dataset.symbol && window.app) {
         window.app.selectSymbol(row.dataset.symbol);
       }
     };
     if (this.binanceFeedEl) this.binanceFeedEl.addEventListener('click', handleFeedClick);
     if (this.bybitFeedEl) this.bybitFeedEl.addEventListener('click', handleFeedClick);
-    if (this.binanceCvdPeakEl) this.binanceCvdPeakEl.addEventListener('click', handleFeedClick);
-    if (this.bybitCvdPeakEl) this.bybitCvdPeakEl.addEventListener('click', handleFeedClick);
   }
 
   _startTimerIfNeeded() {
@@ -163,54 +159,6 @@ export class RadarComponent {
       <div class="feed-row-bottom">
         <span class="feed-side" style="color:${isLong ? 'var(--short-red)' : 'var(--long-green)'};">
           ${sideText} ${isCascade ? '💥 LINK' : ''}
-        </span>
-        <span class="feed-time">${timeStr}</span>
-      </div>
-    `;
-
-    targetFeed.prepend(row);
-
-    // Keep max 50 rows per column
-    while (targetFeed.children.length > 50) {
-      targetFeed.removeChild(targetFeed.lastChild);
-    }
-  }
-
-  addCvdSlopePeak(event) {
-    const exch = (event.exchange || 'binance').toLowerCase();
-    const targetFeed = exch === 'binance' ? this.binanceCvdPeakEl : this.bybitCvdPeakEl;
-    if (!targetFeed) return;
-
-    const row = document.createElement('div');
-    const isBuy = event.side === 'buy' || (event.slope_usd_sec || 0) > 0;
-    const evClass = event.event_class || '';
-    const isTrap = evClass === 'ICEBERG_SHORT_TRAP' || evClass === 'SUPPORT_ABSORPTION';
-    const isLeadLag = event.is_lead_lag;
-    const rowClass = isTrap ? 'trap-burst' : (isLeadLag ? 'lead-burst' : (isBuy ? 'buy-burst' : 'sell-burst'));
-    const slopeRate = Math.abs(event.slope_usd_sec || 0);
-    const sign = (event.slope_usd_sec || 0) >= 0 ? '+' : '-';
-    const rateStr = `${sign}$${this._fmtUsd(slopeRate)}/s`;
-    const zScore = event.z_score ? `${event.z_score >= 0 ? '+' : ''}${event.z_score}σ` : '';
-    const accelStr = event.accel_ratio ? `🔥${event.accel_ratio}x` : '';
-
-    const timeDate = event.time ? new Date(event.time) : new Date();
-    const timeStr = timeDate.toTimeString().split(' ')[0];
-
-    row.className = `cvd-peak-row ${rowClass}`;
-    row.style.cursor = 'pointer';
-    row.title = `${event.symbol} (${exch.toUpperCase()}) ${event.insight || 'CVD 피크'} - 클릭 시 차트 즉시 전환`;
-    row.dataset.symbol = event.symbol;
-    row.innerHTML = `
-      <div class="feed-row-top">
-        <span class="feed-sym">${event.symbol}</span>
-        <div style="display:flex; gap:3px; align-items:center;">
-          ${accelStr ? `<span style="font-size:9px; font-weight:800; color:var(--warn-amber);">${accelStr}</span>` : ''}
-          <span class="cvd-rate-badge ${isBuy ? 'buy' : 'sell'}">${rateStr}</span>
-        </div>
-      </div>
-      <div class="feed-row-bottom">
-        <span class="feed-side" style="color:${isTrap ? 'var(--warn-amber)' : (isBuy ? 'var(--long-green)' : 'var(--short-red)')};">
-          ${event.insight || 'CVD 피크'} ${zScore ? `(${zScore})` : ''}
         </span>
         <span class="feed-time">${timeStr}</span>
       </div>
