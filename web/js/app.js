@@ -146,6 +146,10 @@ class CascadeTradingApp {
 
       case 'CASCADE_BURST':
         this.radar.addCascadeBurst(msg.cascade);
+        if (msg.cascade?.symbol) {
+          this.selectSymbol(msg.cascade.symbol);
+          this.terminal.showToast(`🚨 [트리거 발동] ${msg.cascade.symbol} 차트로 즉시 자동 전환!`, 'warn');
+        }
         break;
 
       case 'LIQUIDATION':
@@ -157,6 +161,10 @@ class CascadeTradingApp {
           if (msg.event.symbol === this.currentSymbol) {
             this.chart.setArmedZone(msg.armed);
           }
+        }
+        if (msg.event?.is_cascade && msg.event.symbol && msg.event.symbol !== this.currentSymbol) {
+          this.selectSymbol(msg.event.symbol);
+          this.terminal.showToast(`⚡ [연쇄 청산] ${msg.event.symbol} 차트로 자동 전환!`, 'warn');
         }
         break;
 
