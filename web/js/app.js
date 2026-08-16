@@ -2,10 +2,10 @@
  * Master Application Controller & WebSocket Connection Manager
  */
 
-import { ProChart } from './chart.js?v=20260817_0524';
-import { RadarComponent } from './radar.js?v=20260817_0524';
-import { TerminalComponent } from './terminal.js?v=20260817_0524';
-import { OrderflowComponent } from './orderflow.js?v=20260817_0524';
+import { ProChart } from './chart.js?v=20260817_0525';
+import { RadarComponent } from './radar.js?v=20260817_0525';
+import { TerminalComponent } from './terminal.js?v=20260817_0525';
+import { OrderflowComponent } from './orderflow.js?v=20260817_0525';
 
 class CascadeTradingApp {
   constructor() {
@@ -229,7 +229,6 @@ class CascadeTradingApp {
     if (!balance) return;
     const equityEl = document.getElementById('accountEquity');
     const availEl = document.getElementById('accountAvailable');
-    const pnlEl = document.getElementById('accountPnl');
     const netPnlEl = document.getElementById('accountNetPnl');
     const feeSubtextEl = document.getElementById('accountFeeSubtext');
 
@@ -254,11 +253,6 @@ class CascadeTradingApp {
     }
 
     const netPnl = totalGrossPnl - totalEstFee;
-
-    if (pnlEl) {
-      pnlEl.textContent = `${totalGrossPnl >= 0 ? '+' : ''}${totalGrossPnl.toFixed(4)} USDT`;
-      pnlEl.className = `summary-value ${totalGrossPnl >= 0 ? 'positive' : 'negative'}`;
-    }
 
     if (netPnlEl) {
       netPnlEl.textContent = `${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(4)} USDT`;

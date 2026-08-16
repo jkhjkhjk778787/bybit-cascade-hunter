@@ -309,14 +309,9 @@ export class TerminalComponent {
           <span class="pos-sym" style="color:${isLong ? 'var(--long-green)' : 'var(--short-red)'}; font-weight:800; font-size:13px;">
             ${isLong ? '🟢 LONG' : '🔴 SHORT'} ${p.symbol} (${p.leverage}x)
           </span>
-          <div style="text-align:right;">
-            <div class="pos-pnl ${grossPnlClass}" style="font-size:11px; opacity:0.85;">
-              미실현: ${grossPnl >= 0 ? '+' : ''}${grossPnl.toFixed(4)} USDT
-            </div>
-            <div class="pos-pnl ${netPnlClass}" style="font-size:13px; font-weight:900; margin-top:1px;">
-              💰 실순익: ${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(4)} USDT
-            </div>
-          </div>
+          <span class="pos-pnl ${netPnlClass}" style="font-size:14px; font-weight:900;">
+            💰 ${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(4)} USDT
+          </span>
         </div>
         <div class="pos-details" style="margin-top:6px; font-size:11.5px; row-gap:3px;">
           <span>진입가: <b>$${p.entryPrice}</b></span>
