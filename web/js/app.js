@@ -2,11 +2,11 @@
  * Master Application Controller & WebSocket Connection Manager
  */
 
-import { ProChart } from './chart.js?v=20260817_1516';
-import { RadarComponent } from './radar.js?v=20260817_1516';
-import { TerminalComponent } from './terminal.js?v=20260817_1516';
-import { OrderflowComponent } from './orderflow.js?v=20260817_1516';
-import { sound } from './sound.js?v=20260817_1516';
+import { ProChart } from './chart.js?v=20260817_1902';
+import { RadarComponent } from './radar.js?v=20260817_1902';
+import { TerminalComponent } from './terminal.js?v=20260817_1902';
+import { OrderflowComponent } from './orderflow.js?v=20260817_1902';
+import { sound } from './sound.js?v=20260817_1902';
 
 class CascadeTradingApp {
   constructor() {
@@ -28,9 +28,40 @@ class CascadeTradingApp {
     this._priceEl = document.getElementById('currentSymPrice');
     this._symNameEl = document.getElementById('currentSymName');
     this._soundBtnEl = document.getElementById('btnSoundToggle');
+    this._autoSwitchBtnEl = document.getElementById('btnAutoSwitchToggle');
 
+    this.isAutoSwitchEnabled = localStorage.getItem('cascade_auto_switch') !== 'false';
+
+    this._initAutoSwitchButton();
     this._initSoundButton();
     this.init();
+  }
+
+  _initAutoSwitchButton() {
+    if (!this._autoSwitchBtnEl) return;
+    const updateBtn = () => {
+      if (this.isAutoSwitchEnabled) {
+        this._autoSwitchBtnEl.textContent = '🔄 AUTO JUMP';
+        this._autoSwitchBtnEl.classList.remove('locked');
+        this._autoSwitchBtnEl.title = '트리거 시 차트 자동 전환 [활성화됨] (클릭 시 고정 모드로 변경)';
+      } else {
+        this._autoSwitchBtnEl.textContent = '🔒 CHART PINNED';
+        this._autoSwitchBtnEl.classList.add('locked');
+        this._autoSwitchBtnEl.title = '차트 고정 모드 [활성화됨] (트리거 시에도 현재 차트 유지)';
+      }
+    };
+    updateBtn();
+
+    this._autoSwitchBtnEl.addEventListener('click', () => {
+      this.isAutoSwitchEnabled = !this.isAutoSwitchEnabled;
+      localStorage.setItem('cascade_auto_switch', this.isAutoSwitchEnabled);
+      updateBtn();
+      if (this.isAutoSwitchEnabled) {
+        this.terminal.showToast('🔄 [자동 점프 활성화] 연쇄 트리거 시 해당 코인 차트로 자동 전환됩니다.', 'info');
+      } else {
+        this.terminal.showToast('🔒 [차트 고정 모드] 트리거가 발생해도 현재 보고 있는 심볼 차트를 유지합니다.', 'warn');
+      }
+    });
   }
 
   _initSoundButton() {
@@ -220,6 +251,8 @@ class CascadeTradingApp {
             this.lastTriggerTimeBySym[sym] = now;
             if (this.hasOpenPosition()) {
               this.terminal.showToast(`💥 [연쇄 트리거] ${sym} 포착 (보유 포지션 보호로 화면 유지)`, 'info');
+            } else if (!this.isAutoSwitchEnabled) {
+              this.terminal.showToast(`💥 [연쇄 트리거] ${sym} 포착 (🔒 차트 고정 모드로 화면 유지)`, 'info');
             } else {
               this.selectSymbol(sym);
               this.terminal.showToast(`🚨 [트리거 발동] ${sym} 차트로 즉시 자동 전환!`, 'warn');
@@ -248,7 +281,11 @@ class CascadeTradingApp {
           const lastT = this.lastTriggerTimeBySym[sym] || 0;
           if (now - lastT >= 25_000) {
             this.lastTriggerTimeBySym[sym] = now;
-            if (!this.hasOpenPosition()) {
+            if (this.hasOpenPosition()) {
+              this.terminal.showToast(`⚡ [연쇄 청산] ${sym} 포착 (보유 포지션 보호로 화면 유지)`, 'info');
+            } else if (!this.isAutoSwitchEnabled) {
+              this.terminal.showToast(`⚡ [연쇄 청산] ${sym} 포착 (🔒 차트 고정 모드로 화면 유지)`, 'info');
+            } else {
               this.selectSymbol(sym);
               this.terminal.showToast(`⚡ [연쇄 청산] ${sym} 차트로 자동 전환!`, 'warn');
             }

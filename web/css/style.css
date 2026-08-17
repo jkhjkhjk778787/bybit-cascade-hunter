@@ -193,6 +193,38 @@ html, body {
 .summary-value.positive { color: var(--long-green); }
 .summary-value.negative { color: var(--short-red); }
 
+.btn-autoswitch-toggle {
+  padding: 6px 12px;
+  font-size: 11.5px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(0, 230, 153, 0.4);
+  background: rgba(0, 230, 153, 0.08);
+  color: var(--long-green);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.btn-autoswitch-toggle:hover {
+  background: rgba(0, 230, 153, 0.18);
+  border-color: var(--long-green);
+}
+
+.btn-autoswitch-toggle.locked {
+  border-color: rgba(255, 171, 0, 0.4);
+  background: rgba(255, 171, 0, 0.1);
+  color: #ffab00;
+}
+
+.btn-autoswitch-toggle.locked:hover {
+  background: rgba(255, 171, 0, 0.2);
+  border-color: #ffab00;
+}
+
 .btn-sound-toggle {
   padding: 6px 12px;
   font-size: 11.5px;
