@@ -2,11 +2,11 @@
  * Master Application Controller & WebSocket Connection Manager
  */
 
-import { ProChart } from './chart.js?v=20260817_1514';
-import { RadarComponent } from './radar.js?v=20260817_1514';
-import { TerminalComponent } from './terminal.js?v=20260817_1514';
-import { OrderflowComponent } from './orderflow.js?v=20260817_1514';
-import { sound } from './sound.js?v=20260817_1514';
+import { ProChart } from './chart.js?v=20260817_1516';
+import { RadarComponent } from './radar.js?v=20260817_1516';
+import { TerminalComponent } from './terminal.js?v=20260817_1516';
+import { OrderflowComponent } from './orderflow.js?v=20260817_1516';
+import { sound } from './sound.js?v=20260817_1516';
 
 class CascadeTradingApp {
   constructor() {
@@ -52,7 +52,6 @@ class CascadeTradingApp {
     if (this._soundTestBtnEl) {
       let testCycle = 0;
       this._soundTestBtnEl.addEventListener('click', () => {
-        sound.ensureContext();
         if (testCycle === 0) {
           sound.playCascadeBurst('Sell');
           this.terminal.showToast('💥 [사운드 테스트] 🔴 숏(Short) 연쇄 격발음 재생!', 'warn');
