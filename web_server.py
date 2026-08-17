@@ -902,6 +902,7 @@ class CascadeTradingServer:
         self.app.router.add_get("/ws/live", self.handle_ws)
         self.app.router.add_static("/css/", path=str(WEB_DIR / "css"), name="css")
         self.app.router.add_static("/js/", path=str(WEB_DIR / "js"), name="js")
+        self.app.router.add_static("/sounds/", path=str(WEB_DIR / "sounds"), name="sounds")
 
     async def handle_index(self, request: web.Request) -> web.Response:
         index_file = WEB_DIR / "index.html"
