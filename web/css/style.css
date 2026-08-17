@@ -193,13 +193,32 @@ html, body {
 .summary-value.positive { color: var(--long-green); }
 .summary-value.negative { color: var(--short-red); }
 
-.header-controls {
-  display: flex;
+.btn-sound-toggle {
+  padding: 6px 12px;
+  font-size: 11.5px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(0, 240, 255, 0.4);
+  background: rgba(0, 240, 255, 0.08);
+  color: var(--brand-cyan);
+  cursor: pointer;
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
+  transition: all 0.2s ease;
 }
 
+.btn-sound-toggle:hover {
+  background: rgba(0, 240, 255, 0.18);
+  border-color: var(--brand-cyan);
+}
 
+.btn-sound-toggle.muted {
+  border-color: var(--border-color);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+}
 
 .btn-emergency-close {
   padding: 6px 12px;

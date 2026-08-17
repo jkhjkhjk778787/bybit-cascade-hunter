@@ -2,10 +2,11 @@
  * Master Application Controller & WebSocket Connection Manager
  */
 
-import { ProChart } from './chart.js?v=20260817_1429';
-import { RadarComponent } from './radar.js?v=20260817_1429';
-import { TerminalComponent } from './terminal.js?v=20260817_1429';
-import { OrderflowComponent } from './orderflow.js?v=20260817_1429';
+import { ProChart } from './chart.js?v=20260817_1510';
+import { RadarComponent } from './radar.js?v=20260817_1510';
+import { TerminalComponent } from './terminal.js?v=20260817_1510';
+import { OrderflowComponent } from './orderflow.js?v=20260817_1510';
+import { sound } from './sound.js?v=20260817_1510';
 
 class CascadeTradingApp {
   constructor() {
@@ -26,8 +27,24 @@ class CascadeTradingApp {
 
     this._priceEl = document.getElementById('currentSymPrice');
     this._symNameEl = document.getElementById('currentSymName');
+    this._soundBtnEl = document.getElementById('btnSoundToggle');
 
+    this._initSoundButton();
     this.init();
+  }
+
+  _initSoundButton() {
+    if (!this._soundBtnEl) return;
+    const updateBtn = () => {
+      const isMuted = sound.isMuted();
+      this._soundBtnEl.textContent = isMuted ? '🔇 SOUND OFF' : '🔊 SOUND ON';
+      this._soundBtnEl.classList.toggle('muted', isMuted);
+    };
+    updateBtn();
+    this._soundBtnEl.addEventListener('click', () => {
+      sound.toggleMute();
+      updateBtn();
+    });
   }
 
   async init() {
@@ -160,6 +177,10 @@ class CascadeTradingApp {
 
       case 'CASCADE_BURST':
         this.radar.addCascadeBurst(msg.cascade);
+        if (msg.cascade) {
+          const side = msg.cascade.target_side || 'Sell';
+          sound.playCascadeBurst(side);
+        }
         if (msg.cascade?.symbol) {
           const sym = msg.cascade.symbol;
           const now = Date.now();
@@ -181,7 +202,11 @@ class CascadeTradingApp {
         this.chart.onLiquidation(msg.event);
         this.orderflow.processLiquidation(msg.event);
         if (msg.armed) {
+          const isNewArmed = !this.armedSymbols[msg.event.symbol];
           this.armedSymbols[msg.event.symbol] = msg.armed;
+          if (isNewArmed && msg.event.exchange === 'binance') {
+            sound.playArmedAlert();
+          }
           if (msg.event.symbol === this.currentSymbol) {
             this.chart.setArmedZone(msg.armed);
           }

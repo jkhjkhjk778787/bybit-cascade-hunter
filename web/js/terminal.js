@@ -1,6 +1,4 @@
-/**
- * Cascade 1-Click Execution Terminal & Positions Module
- */
+import { sound } from './sound.js?v=20260817_1510';
 
 export class TerminalComponent {
   constructor(app) {
@@ -239,6 +237,7 @@ export class TerminalComponent {
       });
       const data = await res.json();
       if (data.success) {
+        sound.playTp();
         this.showToast(`✅ [체결 성공] ${this.selectedSymbol} ${this.selectedSide} $${this.orderUsd} (${this.leverage}x)`, 'success');
       } else {
         let errStr = data.response?.retMsg || data.error || '알 수 없는 오류';
