@@ -2,10 +2,10 @@
  * Master Application Controller & WebSocket Connection Manager
  */
 
-import { ProChart } from './chart.js?v=20260817_0613';
-import { RadarComponent } from './radar.js?v=20260817_0613';
-import { TerminalComponent } from './terminal.js?v=20260817_0613';
-import { OrderflowComponent } from './orderflow.js?v=20260817_0613';
+import { ProChart } from './chart.js?v=20260817_1429';
+import { RadarComponent } from './radar.js?v=20260817_1429';
+import { TerminalComponent } from './terminal.js?v=20260817_1429';
+import { OrderflowComponent } from './orderflow.js?v=20260817_1429';
 
 class CascadeTradingApp {
   constructor() {
@@ -78,7 +78,7 @@ class CascadeTradingApp {
 
     // 4. Switch Chart only when switching to a different symbol
     if (isDifferent) {
-      this.chart.setSymbol(sym);
+      this.chart.setSymbol(sym, knownPrice);
       const armed = this.armedSymbols[sym];
       if (armed && (Date.now() / 1000 <= armed.expires)) {
         this.chart.setArmedZone(armed);
