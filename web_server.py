@@ -1190,42 +1190,67 @@ class CascadeTradingServer:
                             bin_liq = binance_recent_liqs.get(sym)
                             if bin_liq and (bin_liq["is_long"] == event.is_long_liquidation):
                                 lag_sec = round(now - bin_liq["ts"], 2)
-                                # ⚡ 백테스트 검증: 2.5초 이내 초고속 진공 전이만 A+ 격발 (3초 이상 지연은 호가 채워짐으로 필터링)
+                                # ⚡ 백테스트 검증: 2.5초 이내 초고속 진공 전이만 격발
                                 if lag_sec <= 2.5 and (now >= self.cascade_cooldowns.get(sym, 0.0)):
-                                    target_side = "Sell" if event.is_long_liquidation else "Buy"
-                                    
-                                    # CVD 스냅샷 및 방향성 가속도 검증
                                     cur_cvd = self._cvd_deltas.get(sym, {})
                                     bin_cvd = cur_cvd.get("binance", 0.0)
                                     byb_cvd = cur_cvd.get("bybit", 0.0)
                                     
-                                    # CVD 가속도 턴어라운드 검증 (숏: 매수벽 없음 / 롱: 매수 턴어라운드)
-                                    cvd_valid = True
-                                    if target_side == "Sell" and byb_cvd > 3000.0 and bin_cvd > 3000.0:
-                                        cvd_valid = False # 숏인데 양사 강력 순매수 지속 시 롱트랩 필터링
-                                    elif target_side == "Buy" and byb_cvd < -3000.0 and bin_cvd < -3000.0:
-                                        cvd_valid = False # 롱인데 양사 강력 덤핑 지속 시 칼날 흡수 편향 필터링
+                                    target_side = None
+                                    strategy = None
+                                    cvd_desc = ""
+                                    tp_pct = 2.0
+                                    sl_pct = 0.75
 
-                                    if cvd_valid:
+                                    if event.is_long_liquidation:
+                                        # 🟡 [롱 청산 이벤트]
+                                        if byb_cvd <= 0.0 or bin_cvd <= 0.0:
+                                            # 1) 순방향 숏 (진공 호가 덤핑)
+                                            target_side = "Sell"
+                                            strategy = "CASCADE_SHORT"
+                                            tp_pct = 2.0
+                                            sl_pct = 0.75
+                                            cvd_desc = "🌊 순매도 지속 ➔ A+ 진공 숏"
+                                        elif byb_cvd >= 3000.0 or bin_cvd >= 3000.0:
+                                            # 2) 역방향 롱 (고래의 V자 흡수 매수 폭발 ➔ 숏스퀴즈)
+                                            target_side = "Buy"
+                                            strategy = "SQUEEZE_LONG"
+                                            tp_pct = 2.5
+                                            sl_pct = 0.80
+                                            cvd_desc = "🚀 고래 V자 매수 폭발 ➔ 숏스퀴즈 롱"
+                                    else:
+                                        # 🟢 [숏 청산 이벤트]
+                                        if byb_cvd >= 0.0 or bin_cvd >= 0.0:
+                                            # 1) 순방향 롱 (돌파 매수)
+                                            target_side = "Buy"
+                                            strategy = "CASCADE_LONG"
+                                            tp_pct = 2.0
+                                            sl_pct = 0.75
+                                            cvd_desc = "🌊 순매수 지속 ➔ A+ 돌파 롱"
+                                        elif byb_cvd <= -3000.0 or bin_cvd <= -3000.0:
+                                            # 2) 역방향 숏 (고래의 추가 덤핑 폭탄 ➔ 롱스퀴즈)
+                                            target_side = "Sell"
+                                            strategy = "SQUEEZE_SHORT"
+                                            tp_pct = 2.5
+                                            sl_pct = 0.80
+                                            cvd_desc = "🩸 고래 덤핑 폭탄 ➔ 롱스퀴즈 숏"
+
+                                    if target_side:
                                         is_cascade = True
                                         self.cascade_cooldowns[sym] = now + 25.0  # 25초 쿨타임 부여
                                         side_kr = "🔴 숏 (SHORT)" if target_side == "Sell" else "🟢 롱 (LONG)"
-                                        
-                                        if bin_cvd < 0 and byb_cvd < 0:
-                                            cvd_desc = "🌊 양사 순매도 (숏 가속도 일치)"
-                                        elif bin_cvd > 0 and byb_cvd > 0:
-                                            cvd_desc = "🌊 양사 순매수 (롱 가속도 일치)"
-                                        else:
-                                            cvd_desc = "⚡ 진공 호가 돌파 (CVD 다이버전스)"
 
                                         cascade_data = {
                                             "symbol": sym,
                                             "grade": "A+",
+                                            "strategy": strategy,
                                             "is_long_liq": event.is_long_liquidation,
                                             "target_side": target_side,
                                             "binance_usd": bin_liq["usd"],
                                             "bybit_usd": event.notional_usd,
                                             "lag_sec": lag_sec,
+                                            "tp_pct": tp_pct,
+                                            "sl_pct": sl_pct,
                                             "cvd_desc": cvd_desc,
                                             "timestamp": int(now * 1000)
                                         }
@@ -1234,7 +1259,7 @@ class CascadeTradingServer:
                                         binance_recent_liqs.pop(sym, None)
                                         self.armed_status.pop(sym, None)
 
-                                        logger.info(f"💥 [A+ 연쇄 격발!] {sym} (Binance ${bin_liq['usd']:,.0f} ➔ Bybit ${event.notional_usd:,.0f} | ⚡{lag_sec}s 전이) [권장: {side_kr}] [{cvd_desc}]")
+                                        logger.info(f"💥 [{strategy}] {sym} (Binance ${bin_liq['usd']:,.0f} ➔ Bybit ${event.notional_usd:,.0f} | ⚡{lag_sec}s 전이) [권장: {side_kr}] [{cvd_desc}] [TP: {tp_pct}% / SL: {sl_pct}%]")
                                         await self.broadcast({
                                             "type": "CASCADE_BURST",
                                             "cascade": cascade_data

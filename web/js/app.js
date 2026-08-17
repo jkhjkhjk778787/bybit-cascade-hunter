@@ -2,11 +2,11 @@
  * Master Application Controller & WebSocket Connection Manager
  */
 
-import { ProChart } from './chart.js?v=20260817_1902';
-import { RadarComponent } from './radar.js?v=20260817_1902';
-import { TerminalComponent } from './terminal.js?v=20260817_1902';
-import { OrderflowComponent } from './orderflow.js?v=20260817_1902';
-import { sound } from './sound.js?v=20260817_1902';
+import { ProChart } from './chart.js?v=20260817_1915';
+import { RadarComponent } from './radar.js?v=20260817_1915';
+import { TerminalComponent } from './terminal.js?v=20260817_1915';
+import { OrderflowComponent } from './orderflow.js?v=20260817_1915';
+import { sound } from './sound.js?v=20260817_1915';
 
 class CascadeTradingApp {
   constructor() {
@@ -244,18 +244,24 @@ class CascadeTradingApp {
           sound.playCascadeBurst(side);
         }
         if (msg.cascade?.symbol) {
-          const sym = msg.cascade.symbol;
+          const c = msg.cascade;
+          const sym = c.symbol;
           const now = Date.now();
           const lastT = this.lastTriggerTimeBySym[sym] || 0;
           if (now - lastT >= 25_000) {
             this.lastTriggerTimeBySym[sym] = now;
+            const stratKr = c.strategy === 'SQUEEZE_LONG' ? '🚀 [숏스퀴즈 롱]' :
+                            c.strategy === 'SQUEEZE_SHORT' ? '🩸 [롱스퀴즈 숏]' :
+                            c.strategy === 'CASCADE_SHORT' ? '💥 [A+ 순방향 숏]' : '💥 [A+ 돌파 롱]';
+            const toastType = c.target_side === 'Sell' ? 'warn' : 'info';
+
             if (this.hasOpenPosition()) {
-              this.terminal.showToast(`💥 [연쇄 트리거] ${sym} 포착 (보유 포지션 보호로 화면 유지)`, 'info');
+              this.terminal.showToast(`${stratKr} ${sym} 포착 (보유 포지션 보호로 화면 유지)`, 'info');
             } else if (!this.isAutoSwitchEnabled) {
-              this.terminal.showToast(`💥 [연쇄 트리거] ${sym} 포착 (🔒 차트 고정 모드로 화면 유지)`, 'info');
+              this.terminal.showToast(`${stratKr} ${sym} 포착 (🔒 차트 고정 모드로 화면 유지)`, 'info');
             } else {
               this.selectSymbol(sym);
-              this.terminal.showToast(`🚨 [트리거 발동] ${sym} 차트로 즉시 자동 전환!`, 'warn');
+              this.terminal.showToast(`🚨 ${stratKr} ${sym} (${c.cvd_desc}) 차트로 자동 전환!`, toastType);
             }
           }
         }
