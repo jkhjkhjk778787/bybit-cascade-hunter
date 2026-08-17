@@ -53,19 +53,27 @@ class CascadeTradingApp {
       let testCycle = 0;
       this._soundTestBtnEl.addEventListener('click', () => {
         if (testCycle === 0) {
-          sound.playCascadeBurst('Sell');
-          this.terminal.showToast('💥 [사운드 테스트] 🔴 숏(Short) 연쇄 격발음 재생!', 'warn');
-        } else if (testCycle === 1) {
-          sound.playCascadeBurst('Buy');
-          this.terminal.showToast('💥 [사운드 테스트] 🟢 롱(Long) 연쇄 격발음 재생!', 'info');
-        } else if (testCycle === 2) {
+          // 🚀 1. 실전 2단계 연쇄 폭포수 풀 시퀀스 시뮬레이션 (바이낸스 장전 ➔ 바이비트 연쇄 청산 격발)
           sound.playArmedAlert();
-          this.terminal.showToast('🟡 [사운드 테스트] 📡 바이낸스 도화선 장전음 재생!', 'info');
+          this.terminal.showToast('🟡 [1단계] 📡 바이낸스 도화선 장전 (퐁~)', 'info');
+          setTimeout(() => {
+            sound.playCascadeBurst('Sell');
+            this.terminal.showToast('💥 [2단계] 🔴 바이비트 연쇄 청산 격발! (삑-삑!)', 'warn');
+          }, 800);
+        } else if (testCycle === 1) {
+          sound.playCascadeBurst('Sell');
+          this.terminal.showToast('💥 [단독 테스트] 🔴 숏(Short) 연쇄 청산 격발음!', 'warn');
+        } else if (testCycle === 2) {
+          sound.playCascadeBurst('Buy');
+          this.terminal.showToast('💥 [단독 테스트] 🟢 롱(Long) 연쇄 청산 격발음!', 'info');
+        } else if (testCycle === 3) {
+          sound.playArmedAlert();
+          this.terminal.showToast('🟡 [단독 테스트] 📡 바이낸스 도화선 장전음 (퐁~)', 'info');
         } else {
           sound.playTp();
-          this.terminal.showToast('🟢 [사운드 테스트] 💰 익절(TP) 체결 화음 재생!', 'success');
+          this.terminal.showToast('🟢 [단독 테스트] 💰 익절(TP) 체결 화음!', 'success');
         }
-        testCycle = (testCycle + 1) % 4;
+        testCycle = (testCycle + 1) % 5;
       });
     }
   }
