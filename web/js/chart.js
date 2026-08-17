@@ -795,32 +795,30 @@ export class ProChart {
 
   _liqMark(ctx, x, y, liq, h) {
     const col = liq.isLong ? '#e74c6b' : '#2ecc71';
-    // vertical dashed line
+    const glowCol = liq.isLong ? 'rgba(231,76,107,0.35)' : 'rgba(46,204,113,0.35)';
+
+    // vertical subtle dashed line
     ctx.save();
-    ctx.strokeStyle = liq.isLong ? 'rgba(231,76,107,0.35)' : 'rgba(46,204,113,0.35)';
+    ctx.strokeStyle = glowCol;
     ctx.lineWidth = 1; ctx.setLineDash([2, 2]);
     ctx.beginPath(); ctx.moveTo(x, this.pad.top); ctx.lineTo(x, h - this.pad.bottom); ctx.stroke();
     ctx.restore();
 
-    // circle
-    const r = Math.min(9, Math.max(4, Math.log10(liq.usd || 100) * 2.2));
-    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fillStyle = col; ctx.fill();
-    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.3; ctx.stroke();
-
-    // label badge
-    const side = liq.isLong ? 'LONG' : 'SHORT';
-    const usd = liq.usd >= 1000 ? `$${(liq.usd / 1000).toFixed(1)}k` : `$${Math.round(liq.usd)}`;
-    const txt = `${liq.exch} ${side} ${usd}`;
-    ctx.font = FONT_LIQ_BADGE;
-    const tw = ctx.measureText(txt).width + 10;
-    const by = liq.isLong ? y - r - 18 : y + r + 4;
-    ctx.fillStyle = col;
+    // Outer subtle glow aura
+    const r = Math.min(7, Math.max(3.5, Math.log10(liq.usd || 100) * 1.8));
     ctx.beginPath();
-    ctx.roundRect(x - tw / 2, by, tw, 16, 4);
+    ctx.arc(x, y, r + 2.5, 0, Math.PI * 2);
+    ctx.fillStyle = glowCol;
     ctx.fill();
-    ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
-    ctx.fillText(txt, x, by + 12);
+
+    // Solid core circle dot
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = col;
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
   }
 
   _priceLine(ctx, w, y, price) {
