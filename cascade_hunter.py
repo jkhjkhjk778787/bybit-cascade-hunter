@@ -357,8 +357,8 @@ class DualExchangeCascadeHunter:
 
                         # 1. Binance 청산 -> 1단계 장전(Armed)
                         if event.exchange == "binance":
-                            arm_threshold = cfg.get("bin_arm_usd", 300.0)
-                            arm_duration = cfg.get("arm_sec", 8.0)
+                            arm_threshold = cfg.get("bin_arm_usd", 200.0)
+                            arm_duration = cfg.get("arm_sec", 2.5) # 백테스트 검증: 2.5초 이내 진공 전이만 유효
 
                             if event.notional_usd >= arm_threshold:
                                 if event.is_long_liquidation:

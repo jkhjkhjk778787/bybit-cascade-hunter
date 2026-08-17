@@ -8,7 +8,7 @@ export class TerminalComponent {
     this.orderUsd = 0.24;
     this.leverage = 25;
     this.tpPct = 2.0;
-    this.slPct = 0.6;
+    this.slPct = 0.75;
     this.isAutoMarginMode = true;
     this.lastPrice = 1.0;
     this.minQty = 0.001;
