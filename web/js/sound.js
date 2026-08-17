@@ -9,35 +9,40 @@ class SoundEngine {
   constructor() {
     this.ctx = null;
     this.muted = localStorage.getItem('cascade_sound_muted') === 'true';
-    this.volume = parseFloat(localStorage.getItem('cascade_sound_volume') || '0.6');
+    this.volume = parseFloat(localStorage.getItem('cascade_sound_volume') || '0.9');
     this.unlocked = false;
 
-    // Auto-unlock on first user interaction
+    // Auto-unlock on first user interaction anywhere on the window
     const unlock = () => {
-      this._initContext();
-      if (this.ctx && this.ctx.state === 'suspended') {
-        this.ctx.resume();
-      }
-      this.unlocked = true;
-      ['click', 'keydown', 'touchstart'].forEach(evt => window.removeEventListener(evt, unlock));
+      this.ensureContext();
+      ['click', 'keydown', 'touchstart', 'mousedown'].forEach(evt => window.removeEventListener(evt, unlock));
     };
-    ['click', 'keydown', 'touchstart'].forEach(evt => window.addEventListener(evt, unlock, { once: true }));
+    ['click', 'keydown', 'touchstart', 'mousedown'].forEach(evt => window.addEventListener(evt, unlock, { once: true }));
   }
 
-  _initContext() {
+  ensureContext() {
     if (!this.ctx) {
-      const AudioContext = window.AudioContext || window.webkitAudioContext;
-      if (AudioContext) {
-        this.ctx = new AudioContext();
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtx) {
+        this.ctx = new AudioCtx();
       }
     }
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume().then(() => {
+        this.unlocked = true;
+      }).catch(e => console.warn('AudioContext resume error:', e));
+    } else if (this.ctx && this.ctx.state === 'running') {
+      this.unlocked = true;
+    }
+    return this.ctx;
   }
 
   toggleMute() {
     this.muted = !this.muted;
     localStorage.setItem('cascade_sound_muted', this.muted);
     if (!this.muted) {
-      this.playTest();
+      this.ensureContext();
+      this.playCascadeBurst('Sell');
     }
     return !this.muted;
   }
@@ -57,24 +62,23 @@ class SoundEngine {
    */
   playCascadeBurst(targetSide = 'Sell') {
     if (this.muted) return;
-    this._initContext();
-    if (!this.ctx) return;
-    if (this.ctx.state === 'suspended') this.ctx.resume();
+    const ctx = this.ensureContext();
+    if (!ctx) return;
 
     const isShort = targetSide === 'Sell' || targetSide === 'SHORT';
-    const now = this.ctx.currentTime;
-    const masterGain = this.ctx.createGain();
-    masterGain.gain.setValueAtTime(this.volume * 0.7, now);
-    masterGain.connect(this.ctx.destination);
+    const now = ctx.currentTime;
+    const masterGain = ctx.createGain();
+    masterGain.gain.setValueAtTime(this.volume, now);
+    masterGain.connect(ctx.destination);
 
     if (isShort) {
-      // 🔴 숏 격발: 1046Hz ➔ 587Hz 강렬한 하강 더블 레이저 펄스
-      this._createLaserPulse(masterGain, now, 1046, 520, 0.12, 'sawtooth');
-      this._createLaserPulse(masterGain, now + 0.14, 880, 440, 0.16, 'sawtooth');
+      // 🔴 숏 격발: 1200Hz ➔ 520Hz 강렬한 하강 더블 레이저 펄스 (100% 가청 보장)
+      this._createLaserPulse(ctx, masterGain, now, 1200, 520, 0.12, 'sawtooth');
+      this._createLaserPulse(ctx, masterGain, now + 0.14, 950, 380, 0.18, 'sawtooth');
     } else {
-      // 🟢 롱 격발: 520Hz ➔ 1046Hz 치솟는 상승 더블 레이저 펄스
-      this._createLaserPulse(masterGain, now, 520, 988, 0.12, 'sawtooth');
-      this._createLaserPulse(masterGain, now + 0.14, 659, 1318, 0.16, 'sawtooth');
+      // 🟢 롱 격발: 520Hz ➔ 1100Hz 치솟는 상승 더블 레이저 펄스
+      this._createLaserPulse(ctx, masterGain, now, 520, 1100, 0.12, 'sawtooth');
+      this._createLaserPulse(ctx, masterGain, now + 0.14, 750, 1450, 0.18, 'sawtooth');
     }
   }
 
@@ -83,24 +87,23 @@ class SoundEngine {
    */
   playArmedAlert() {
     if (this.muted) return;
-    this._initContext();
-    if (!this.ctx) return;
-    if (this.ctx.state === 'suspended') this.ctx.resume();
+    const ctx = this.ensureContext();
+    if (!ctx) return;
 
-    const now = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
 
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(587.33, now); // D5 소나음
+    osc.frequency.setValueAtTime(659.25, now); // E5 소나음
     osc.frequency.exponentialRampToValueAtTime(520, now + 0.35);
 
     gain.gain.setValueAtTime(0.001, now);
-    gain.gain.linearRampToValueAtTime(this.volume * 0.45, now + 0.02);
+    gain.gain.linearRampToValueAtTime(this.volume * 0.6, now + 0.02);
     gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
 
     osc.connect(gain);
-    gain.connect(this.ctx.destination);
+    gain.connect(ctx.destination);
 
     osc.start(now);
     osc.stop(now + 0.45);
@@ -111,27 +114,26 @@ class SoundEngine {
    */
   playTp() {
     if (this.muted) return;
-    this._initContext();
-    if (!this.ctx) return;
-    if (this.ctx.state === 'suspended') this.ctx.resume();
+    const ctx = this.ensureContext();
+    if (!ctx) return;
 
     const freqs = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
-    const now = this.ctx.currentTime;
+    const now = ctx.currentTime;
 
     freqs.forEach((f, idx) => {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
       const t = now + idx * 0.07;
 
       osc.type = 'triangle';
       osc.frequency.setValueAtTime(f, t);
 
       gain.gain.setValueAtTime(0.001, t);
-      gain.gain.linearRampToValueAtTime(this.volume * 0.5, t + 0.015);
+      gain.gain.linearRampToValueAtTime(this.volume * 0.55, t + 0.015);
       gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
 
       osc.connect(gain);
-      gain.connect(this.ctx.destination);
+      gain.connect(ctx.destination);
 
       osc.start(t);
       osc.stop(t + 0.28);
@@ -143,57 +145,30 @@ class SoundEngine {
    */
   playSl() {
     if (this.muted) return;
-    this._initContext();
-    if (!this.ctx) return;
-    if (this.ctx.state === 'suspended') this.ctx.resume();
+    const ctx = this.ensureContext();
+    if (!ctx) return;
 
-    const now = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
 
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(160, now);
+    osc.frequency.setValueAtTime(180, now);
     osc.frequency.exponentialRampToValueAtTime(50, now + 0.25);
 
-    gain.gain.setValueAtTime(this.volume * 0.5, now);
+    gain.gain.setValueAtTime(this.volume * 0.6, now);
     gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
 
     osc.connect(gain);
-    gain.connect(this.ctx.destination);
+    gain.connect(ctx.destination);
 
     osc.start(now);
     osc.stop(now + 0.25);
   }
 
-  /**
-   * 사운드 테스트 비프
-   */
-  playTest() {
-    this._initContext();
-    if (!this.ctx) return;
-    if (this.ctx.state === 'suspended') this.ctx.resume();
-
-    const now = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(880, now); // A5
-
-    gain.gain.setValueAtTime(0.001, now);
-    gain.gain.linearRampToValueAtTime(this.volume * 0.4, now + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
-
-    osc.connect(gain);
-    gain.connect(this.ctx.destination);
-
-    osc.start(now);
-    osc.stop(now + 0.15);
-  }
-
-  _createLaserPulse(masterGain, startTime, startFreq, endFreq, duration, type = 'sawtooth') {
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
+  _createLaserPulse(ctx, masterGain, startTime, startFreq, endFreq, duration, type = 'sawtooth') {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
 
     osc.type = type;
     osc.frequency.setValueAtTime(startFreq, startTime);

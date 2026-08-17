@@ -2,11 +2,11 @@
  * Master Application Controller & WebSocket Connection Manager
  */
 
-import { ProChart } from './chart.js?v=20260817_1510';
-import { RadarComponent } from './radar.js?v=20260817_1510';
-import { TerminalComponent } from './terminal.js?v=20260817_1510';
-import { OrderflowComponent } from './orderflow.js?v=20260817_1510';
-import { sound } from './sound.js?v=20260817_1510';
+import { ProChart } from './chart.js?v=20260817_1514';
+import { RadarComponent } from './radar.js?v=20260817_1514';
+import { TerminalComponent } from './terminal.js?v=20260817_1514';
+import { OrderflowComponent } from './orderflow.js?v=20260817_1514';
+import { sound } from './sound.js?v=20260817_1514';
 
 class CascadeTradingApp {
   constructor() {
@@ -34,17 +34,41 @@ class CascadeTradingApp {
   }
 
   _initSoundButton() {
-    if (!this._soundBtnEl) return;
-    const updateBtn = () => {
-      const isMuted = sound.isMuted();
-      this._soundBtnEl.textContent = isMuted ? '🔇 SOUND OFF' : '🔊 SOUND ON';
-      this._soundBtnEl.classList.toggle('muted', isMuted);
-    };
-    updateBtn();
-    this._soundBtnEl.addEventListener('click', () => {
-      sound.toggleMute();
+    this._soundTestBtnEl = document.getElementById('btnSoundTest');
+
+    if (this._soundBtnEl) {
+      const updateBtn = () => {
+        const isMuted = sound.isMuted();
+        this._soundBtnEl.textContent = isMuted ? '🔇 SOUND OFF' : '🔊 SOUND ON';
+        this._soundBtnEl.classList.toggle('muted', isMuted);
+      };
       updateBtn();
-    });
+      this._soundBtnEl.addEventListener('click', () => {
+        sound.toggleMute();
+        updateBtn();
+      });
+    }
+
+    if (this._soundTestBtnEl) {
+      let testCycle = 0;
+      this._soundTestBtnEl.addEventListener('click', () => {
+        sound.ensureContext();
+        if (testCycle === 0) {
+          sound.playCascadeBurst('Sell');
+          this.terminal.showToast('💥 [사운드 테스트] 🔴 숏(Short) 연쇄 격발음 재생!', 'warn');
+        } else if (testCycle === 1) {
+          sound.playCascadeBurst('Buy');
+          this.terminal.showToast('💥 [사운드 테스트] 🟢 롱(Long) 연쇄 격발음 재생!', 'info');
+        } else if (testCycle === 2) {
+          sound.playArmedAlert();
+          this.terminal.showToast('🟡 [사운드 테스트] 📡 바이낸스 도화선 장전음 재생!', 'info');
+        } else {
+          sound.playTp();
+          this.terminal.showToast('🟢 [사운드 테스트] 💰 익절(TP) 체결 화음 재생!', 'success');
+        }
+        testCycle = (testCycle + 1) % 4;
+      });
+    }
   }
 
   async init() {
